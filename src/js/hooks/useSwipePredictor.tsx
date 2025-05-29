@@ -135,15 +135,15 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
       if (predictorIdRef.current !== null) {
         SwipePredictor.addTouchPoint(
           predictorIdRef.current,
-          translationX,
-          translationY,
+          translationX as number,
+          translationY as number,
           timestamp
         );
         
         if (debug) {
           touchPointsRef.current.push({
-            x: translationX,
-            y: translationY,
+            x: translationX as number,
+            y: translationY as number,
             timestamp,
           });
           
