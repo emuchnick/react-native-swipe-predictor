@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   StyleSheet,
   View,
@@ -6,7 +6,7 @@ import {
   Dimensions,
   SafeAreaView,
   Switch,
-  Button,
+  TouchableOpacity,
 } from "react-native";
 import {
   GestureHandlerRootView,
@@ -21,6 +21,10 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSwipePredictor, SwipePredictorDebugOverlay } from "react-native-swipe-predictor";
 import BenchmarksScreen from "./benchmarks";
+import DemoSelector, { DemoType } from "./demos/DemoSelector";
+import InstagramStoriesDemo from "./demos/InstagramStories";
+import TinderCardsDemo from "./demos/TinderCards";
+import ImageGalleryDemo from "./demos/ImageGallery";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 const CARD_WIDTH = screenWidth * 0.85;
@@ -160,33 +164,82 @@ function SwipeableCard() {
 }
 
 export default function App() {
-  const [showBenchmarks, setShowBenchmarks] = React.useState(false);
+  const [currentDemo, setCurrentDemo] = useState<DemoType | 'benchmarks' | null>(null);
 
-  if (showBenchmarks) {
-    return <BenchmarksScreen />;
+  // Demo header with back button
+  const DemoHeader = ({ title }: { title: string }) => (
+    <View style={styles.demoHeader}>
+      <TouchableOpacity style={styles.backButton} onPress={() => setCurrentDemo(null)}>
+        <Text style={styles.backButtonText}>← Back</Text>
+      </TouchableOpacity>
+      <Text style={styles.demoHeaderTitle}>{title}</Text>
+    </View>
+  );
+
+  // Render selected demo
+  if (currentDemo === 'benchmarks') {
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <DemoHeader title="Benchmarks" />
+        <BenchmarksScreen />
+      </GestureHandlerRootView>
+    );
   }
 
+  if (currentDemo === 'instagram') {
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <DemoHeader title="Instagram Stories" />
+        <InstagramStoriesDemo />
+      </GestureHandlerRootView>
+    );
+  }
+
+  if (currentDemo === 'tinder') {
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <DemoHeader title="Tinder Cards" />
+        <TinderCardsDemo />
+      </GestureHandlerRootView>
+    );
+  }
+
+  if (currentDemo === 'gallery') {
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <DemoHeader title="Image Gallery" />
+        <ImageGalleryDemo />
+      </GestureHandlerRootView>
+    );
+  }
+
+  if (currentDemo === 'basic') {
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <SafeAreaView style={styles.root}>
+          <DemoHeader title="Basic Demo" />
+          <SwipeableCard />
+          <View style={styles.instructions}>
+            <Text style={styles.instructionText}>
+              Swipe the card in any direction.{"\n"}
+              Watch the green ghost predict where it will go!
+            </Text>
+          </View>
+        </SafeAreaView>
+      </GestureHandlerRootView>
+    );
+  }
+
+  // Show demo selector
   return (
     <GestureHandlerRootView style={styles.root}>
-      <SafeAreaView style={styles.root}>
-        <View style={styles.header}>
-          <Text style={styles.title}>React Native Swipe Predictor</Text>
-          <Text style={styles.subtitle}>Physics-based gesture prediction</Text>
-          <Button
-            title="Run Benchmarks"
-            onPress={() => setShowBenchmarks(true)}
-          />
-        </View>
-
-        <SwipeableCard />
-
-        <View style={styles.instructions}>
-          <Text style={styles.instructionText}>
-            Swipe the card in any direction.{"\n"}
-            Watch the green ghost predict where it will go!
-          </Text>
-        </View>
-      </SafeAreaView>
+      <DemoSelector onSelectDemo={setCurrentDemo} />
+      <TouchableOpacity 
+        style={styles.benchmarkButton} 
+        onPress={() => setCurrentDemo('benchmarks')}
+      >
+        <Text style={styles.benchmarkButtonText}>Run Benchmarks</Text>
+      </TouchableOpacity>
     </GestureHandlerRootView>
   );
 }
@@ -288,5 +341,43 @@ const styles = StyleSheet.create({
     color: "white",
     marginRight: 10,
     fontSize: 14,
+  },
+  demoHeader: {
+    position: 'absolute',
+    top: 50,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    zIndex: 100,
+  },
+  backButton: {
+    padding: 10,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#007AFF',
+  },
+  demoHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 10,
+  },
+  benchmarkButton: {
+    position: 'absolute',
+    bottom: 40,
+    left: 20,
+    right: 20,
+    backgroundColor: '#007AFF',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  benchmarkButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

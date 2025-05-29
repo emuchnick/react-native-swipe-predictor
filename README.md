@@ -36,6 +36,31 @@ Try out these interactive examples:
 - **[Navigation Drawer](usage-examples/navigation-drawer)** - Smooth drawer with predictive opening/closing
 - **[Image Gallery](usage-examples/image-gallery)** - Gallery with buttery smooth image transitions
 
+## Who Needs This Library?
+
+### ✅ You NEED this if you're building:
+
+- **Dating apps with card swiping** (Tinder-style) - Predict swipe decisions and start card animations early
+- **Media apps with heavy images/videos** - Pre-load next content based on swipe trajectory
+- **Games or drawing apps** in React Native - Eliminate input lag for better responsiveness
+- **Apps targeting older Android devices** (pre-2020) - Compensate for slower touch processing
+- **Any UI where 80ms latency is noticeable** - Navigation drawers, carousels, dismissible cards
+
+### ❌ You DON'T need this for:
+
+- Simple CRUD apps with basic navigation
+- Apps with standard scrolling lists (ScrollView/FlatList handle this well)
+- Apps only targeting iPhone 12+ (already have excellent touch latency)
+- Forms, buttons, or tap-based interactions
+- Apps where animations can wait until after touch release
+
+### Real-world impact:
+
+- **Instagram Stories**: Pre-load next story when user starts swiping = instant transitions
+- **Image Galleries**: Start loading hi-res image before swipe completes = no loading state
+- **Navigation Drawers**: Begin open/close animation during swipe = feels native
+- **Card Games**: Predict throw trajectory for realistic physics = better game feel
+
 ## 🚀 5-Minute Setup Guide
 
 This library uses **Rust** for high-performance calculations, but don't worry! Everything is pre-built and you don't need to know Rust or have any Rust tools installed.
@@ -315,6 +340,111 @@ Maintained FPS: 120
 
 ## Advanced Usage
 
+### Helper Hooks
+
+We provide pre-built hooks for common use cases:
+
+#### `usePredictiveImageGallery`
+
+Optimized for image galleries with smart preloading:
+
+```tsx
+import { usePredictiveImageGallery } from 'react-native-swipe-predictor';
+
+const { onTouchMove, onTouchStart, onTouchEnd } = usePredictiveImageGallery({
+  images: imageUrls,
+  currentIndex,
+  imageWidth: SCREEN_WIDTH,
+  onPreload: (indices, priority) => {
+    indices.forEach(index => {
+      Image.prefetch(imageUrls[index]);
+    });
+  },
+  preloadRadius: 2, // Preload 2 images in each direction
+});
+```
+
+#### `usePredictiveCards`
+
+Perfect for Tinder-style card interactions:
+
+```tsx
+import { usePredictiveCards } from 'react-native-swipe-predictor';
+
+const { onTouchMove, onTouchStart, onTouchEnd, predictedAction } = usePredictiveCards({
+  onActionPredicted: (action, confidence) => {
+    'worklet';
+    switch (action) {
+      case 'like':
+        cardRotation.value = withSpring(15);
+        break;
+      case 'dislike':
+        cardRotation.value = withSpring(-15);
+        break;
+      case 'superlike':
+        cardScale.value = withSpring(1.2);
+        break;
+    }
+  },
+  horizontalThreshold: 120,
+  verticalThreshold: -100,
+});
+```
+
+#### `usePredictiveNavigation`
+
+For navigation gestures with directional prediction:
+
+```tsx
+import { usePredictiveNavigation } from 'react-native-swipe-predictor';
+
+const { onTouchMove, onTouchStart, onTouchEnd } = usePredictiveNavigation({
+  onNavigationPredicted: (direction, confidence) => {
+    if (confidence > 0.8) {
+      switch (direction) {
+        case 'left':
+          prefetchScreen('NextScreen');
+          break;
+        case 'right':
+          prepareGoBack();
+          break;
+      }
+    }
+  },
+  navigationThreshold: 100,
+});
+```
+
+#### `useSwipePredictorWithMetrics`
+
+Monitor performance and accuracy:
+
+```tsx
+import { useSwipePredictorWithMetrics } from 'react-native-swipe-predictor';
+
+const { 
+  onTouchMove, 
+  onTouchStart, 
+  onTouchEnd, 
+  metrics 
+} = useSwipePredictorWithMetrics({
+  onPrediction: ({ x, y }) => {
+    // Your prediction handler
+  },
+  onValidatePrediction: (prediction, actual) => {
+    const distance = Math.sqrt(
+      Math.pow(prediction.x - actual.x, 2) + 
+      Math.pow(prediction.y - actual.y, 2)
+    );
+    return distance < 50; // Within 50 pixels
+  }
+});
+
+console.log('Average confidence:', metrics.averageConfidence);
+console.log('Predictions/sec:', metrics.predictionsPerSecond);
+console.log('Accuracy:', metrics.accuracy);
+```
+
 ### Custom Physics
 
 Fine-tune the physics model for your specific use case:
@@ -322,10 +452,10 @@ Fine-tune the physics model for your specific use case:
 ```tsx
 const { onTouchStart, onTouchMove, onTouchEnd } = useSwipePredictor({
   physics: {
-    deceleration: 1500, // px/s²
-    minimumVelocity: 50, // px/s
-    projectionTime: 300, // ms
-    smoothingFactor: 0.8,
+    decelerationRate: 1500, // px/s²
+    minVelocityThreshold: 50, // px/s
+    minGestureTimeMs: 30, // ms
+    velocitySmoothingFactor: 0.7,
   },
 });
 ```

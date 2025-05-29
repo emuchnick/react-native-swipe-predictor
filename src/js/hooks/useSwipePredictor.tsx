@@ -13,6 +13,49 @@ import type {
   DebugInfo 
 } from '../types';
 
+/**
+ * React hook for physics-based swipe gesture prediction
+ * 
+ * @description
+ * This hook provides real-time predictions of where a swipe gesture will end,
+ * allowing you to start animations before the user lifts their finger.
+ * It uses physics-based calculations implemented in Rust for high performance.
+ * 
+ * @param {SwipePredictorOptions} options - Configuration options
+ * @returns {SwipePredictorHookResult} Hook result with gesture handlers and prediction data
+ * 
+ * @example
+ * ```tsx
+ * const { onTouchMove, onTouchStart, onTouchEnd, prediction } = useSwipePredictor({
+ *   confidenceThreshold: 0.8,
+ *   onPrediction: ({ x, y, confidence }) => {
+ *     'worklet';
+ *     if (confidence > 0.8) {
+ *       translateX.value = withSpring(x);
+ *       translateY.value = withSpring(y);
+ *     }
+ *   }
+ * });
+ * 
+ * return (
+ *   <PanGestureHandler
+ *     onBegan={onTouchStart}
+ *     onUpdate={onTouchMove}
+ *     onEnded={onTouchEnd}
+ *   >
+ *     <Animated.View style={animatedStyles}>
+ *       {content}
+ *     </Animated.View>
+ *   </PanGestureHandler>
+ * );
+ * ```
+ * 
+ * @remarks
+ * - The hook automatically manages predictor lifecycle
+ * - Predictions are updated at 60 FPS by default (configurable)
+ * - The onPrediction callback runs on the JS thread
+ * - Use worklet directive in onPrediction for better performance
+ */
 export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePredictorHookResult {
   const {
     confidenceThreshold = 0.7,

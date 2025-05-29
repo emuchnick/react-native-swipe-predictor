@@ -6,9 +6,10 @@ class SwipePredictorModule: RCTEventEmitter {
     private var predictorUpdateTimer: Timer?
     private var activePredictors: [Int: PredictorInfo] = [:]
     private var displayLink: CADisplayLink?
+    private var context: OpaquePointer?
     
     struct PredictorInfo {
-        let predictorId: Int32
+        let handle: OpaquePointer
         var lastUpdate: Date
         var updateInterval: TimeInterval
         var confidenceThreshold: Double
@@ -18,8 +19,18 @@ class SwipePredictorModule: RCTEventEmitter {
     override init() {
         super.init()
         
-        // Initialize the Rust predictor manager with default physics
-        init_predictor_manager(1500.0, 50.0, 30.0, 0.7)
+        // Initialize panic handler for Rust FFI
+        swipe_predictor_init_panic_handler()
+        
+        // Create a default context with handle-based API
+        context = swipe_predictor_context_create_default()
+    }
+    
+    deinit {
+        // Clean up the context when the module is deallocated
+        if let ctx = context {
+            swipe_predictor_context_destroy(ctx)
+        }
     }
     
     override static func requiresMainQueueSetup() -> Bool {
@@ -35,28 +46,35 @@ class SwipePredictorModule: RCTEventEmitter {
                         resolver resolve: @escaping RCTPromiseResolveBlock,
                         rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            let predictorId = init_predictor()
+            guard let context = self?.context else {
+                reject("NO_CONTEXT", "SwipePredictor context not initialized", nil)
+                return
+            }
             
-            if predictorId >= 0 {
-                let updateInterval = (options["updateInterval"] as? TimeInterval) ?? 0.016 // 60 FPS default
-                let confidenceThreshold = (options["confidenceThreshold"] as? Double) ?? 0.7
-                let onPredictionCallback = options["onPredictionCallback"] as? String
-                
-                let info = PredictorInfo(
-                    predictorId: predictorId,
-                    lastUpdate: Date(),
-                    updateInterval: updateInterval,
-                    confidenceThreshold: confidenceThreshold,
-                    onPredictionCallback: onPredictionCallback
-                )
-                
-                DispatchQueue.main.async {
-                    self?.activePredictors[Int(predictorId)] = info
-                    self?.startDisplayLinkIfNeeded()
-                    resolve(predictorId)
-                }
-            } else {
-                reject("INIT_FAILED", "Failed to initialize predictor", nil)
+            guard let handle = swipe_predictor_create_in_context(context) else {
+                reject("INIT_FAILED", "Failed to create predictor", nil)
+                return
+            }
+            
+            let updateInterval = (options["updateInterval"] as? TimeInterval) ?? 0.016 // 60 FPS default
+            let confidenceThreshold = (options["confidenceThreshold"] as? Double) ?? 0.7
+            let onPredictionCallback = options["onPredictionCallback"] as? String
+            
+            // Generate a unique ID for this predictor
+            let predictorId = Int(bitPattern: handle)
+            
+            let info = PredictorInfo(
+                handle: handle,
+                lastUpdate: Date(),
+                updateInterval: updateInterval,
+                confidenceThreshold: confidenceThreshold,
+                onPredictionCallback: onPredictionCallback
+            )
+            
+            DispatchQueue.main.async {
+                self?.activePredictors[predictorId] = info
+                self?.startDisplayLinkIfNeeded()
+                resolve(predictorId)
             }
         }
     }
@@ -66,8 +84,10 @@ class SwipePredictorModule: RCTEventEmitter {
                       x: Double,
                       y: Double,
                       timestamp: Double) {
+        guard let info = activePredictors[predictorId] else { return }
+        
         DispatchQueue.global(qos: .userInteractive).async {
-            add_touch_point(Int32(predictorId), x, y, timestamp)
+            swipe_predictor_add_point(info.handle, x, y, timestamp)
         }
     }
     
@@ -75,12 +95,17 @@ class SwipePredictorModule: RCTEventEmitter {
     func getPrediction(_ predictorId: Int,
                       resolver resolve: @escaping RCTPromiseResolveBlock,
                       rejecter reject: @escaping RCTPromiseRejectBlock) {
+        guard let info = activePredictors[predictorId] else {
+            resolve(nil)
+            return
+        }
+        
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             var x: Double = 0.0
             var y: Double = 0.0
             var confidence: Double = 0.0
             
-            let result = get_prediction(Int32(predictorId), &x, &y, &confidence)
+            let result = swipe_predictor_get_prediction(info.handle, &x, &y, &confidence)
             
             if result == 1 {
                 let prediction: [String: Any] = [
@@ -90,8 +115,7 @@ class SwipePredictorModule: RCTEventEmitter {
                 ]
                 
                 DispatchQueue.main.async {
-                    if let info = self?.activePredictors[predictorId],
-                       confidence >= info.confidenceThreshold {
+                    if confidence >= info.confidenceThreshold {
                         resolve(prediction)
                     } else {
                         resolve(nil)
@@ -107,8 +131,10 @@ class SwipePredictorModule: RCTEventEmitter {
     
     @objc
     func resetPredictor(_ predictorId: Int) {
+        guard let info = activePredictors[predictorId] else { return }
+        
         DispatchQueue.global(qos: .userInteractive).async {
-            reset_predictor(Int32(predictorId))
+            swipe_predictor_reset(info.handle)
         }
     }
     
@@ -116,16 +142,23 @@ class SwipePredictorModule: RCTEventEmitter {
     func detectCancellation(_ predictorId: Int,
                            resolver resolve: @escaping RCTPromiseResolveBlock,
                            rejecter reject: @escaping RCTPromiseRejectBlock) {
+        guard let info = activePredictors[predictorId] else {
+            resolve(false)
+            return
+        }
+        
         DispatchQueue.global(qos: .userInteractive).async {
-            let isCancelled = detect_cancellation(Int32(predictorId))
+            let isCancelled = swipe_predictor_detect_cancellation(info.handle)
             resolve(isCancelled == 1)
         }
     }
     
     @objc
     func removePredictor(_ predictorId: Int) {
+        guard let info = activePredictors[predictorId] else { return }
+        
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            remove_predictor(Int32(predictorId))
+            swipe_predictor_destroy(info.handle)
             
             DispatchQueue.main.async {
                 self?.activePredictors.removeValue(forKey: predictorId)
@@ -162,17 +195,18 @@ class SwipePredictorModule: RCTEventEmitter {
     }
     
     private func checkAndSendPrediction(predictorId: Int) {
+        guard let info = activePredictors[predictorId] else { return }
+        
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             var x: Double = 0.0
             var y: Double = 0.0
             var confidence: Double = 0.0
             
-            let result = get_prediction(Int32(predictorId), &x, &y, &confidence)
+            let result = swipe_predictor_get_prediction(info.handle, &x, &y, &confidence)
             
             if result == 1 {
                 DispatchQueue.main.async {
-                    if let info = self?.activePredictors[predictorId],
-                       confidence >= info.confidenceThreshold {
+                    if confidence >= info.confidenceThreshold {
                         let prediction: [String: Any] = [
                             "predictorId": predictorId,
                             "x": x,
@@ -186,7 +220,7 @@ class SwipePredictorModule: RCTEventEmitter {
             }
             
             // Check for cancellation
-            let isCancelled = detect_cancellation(Int32(predictorId))
+            let isCancelled = swipe_predictor_detect_cancellation(info.handle)
             if isCancelled == 1 {
                 DispatchQueue.main.async {
                     self?.sendEvent(withName: "onCancellation", body: ["predictorId": predictorId])
@@ -197,29 +231,32 @@ class SwipePredictorModule: RCTEventEmitter {
 }
 
 // Rust FFI function declarations
-@_silgen_name("init_predictor_manager")
-func init_predictor_manager(_ deceleration_rate: Double, 
-                           _ min_velocity_threshold: Double,
-                           _ min_gesture_time_ms: Double,
-                           _ velocity_smoothing_factor: Double)
+@_silgen_name("swipe_predictor_init_panic_handler")
+func swipe_predictor_init_panic_handler()
 
-@_silgen_name("init_predictor")
-func init_predictor() -> Int32
+@_silgen_name("swipe_predictor_context_create_default")
+func swipe_predictor_context_create_default() -> OpaquePointer?
 
-@_silgen_name("add_touch_point")
-func add_touch_point(_ predictor_id: Int32, _ x: Double, _ y: Double, _ timestamp: Double)
+@_silgen_name("swipe_predictor_context_destroy")
+func swipe_predictor_context_destroy(_ ctx: OpaquePointer)
 
-@_silgen_name("get_prediction")
-func get_prediction(_ predictor_id: Int32, 
-                   _ out_x: UnsafeMutablePointer<Double>,
-                   _ out_y: UnsafeMutablePointer<Double>,
-                   _ out_confidence: UnsafeMutablePointer<Double>) -> Int32
+@_silgen_name("swipe_predictor_create_in_context")
+func swipe_predictor_create_in_context(_ ctx: OpaquePointer) -> OpaquePointer?
 
-@_silgen_name("reset_predictor")
-func reset_predictor(_ predictor_id: Int32)
+@_silgen_name("swipe_predictor_destroy")
+func swipe_predictor_destroy(_ handle: OpaquePointer)
 
-@_silgen_name("detect_cancellation")
-func detect_cancellation(_ predictor_id: Int32) -> Int32
+@_silgen_name("swipe_predictor_add_point")
+func swipe_predictor_add_point(_ handle: OpaquePointer, _ x: Double, _ y: Double, _ timestamp: Double) -> Int32
 
-@_silgen_name("remove_predictor")
-func remove_predictor(_ predictor_id: Int32)
+@_silgen_name("swipe_predictor_get_prediction")
+func swipe_predictor_get_prediction(_ handle: OpaquePointer,
+                                   _ out_x: UnsafeMutablePointer<Double>,
+                                   _ out_y: UnsafeMutablePointer<Double>,
+                                   _ out_confidence: UnsafeMutablePointer<Double>) -> Int32
+
+@_silgen_name("swipe_predictor_reset")
+func swipe_predictor_reset(_ handle: OpaquePointer) -> Int32
+
+@_silgen_name("swipe_predictor_detect_cancellation")
+func swipe_predictor_detect_cancellation(_ handle: OpaquePointer) -> Int32
