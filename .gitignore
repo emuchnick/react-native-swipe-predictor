@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+lib/
+build/
+target/
+*.a
+*.so
+*.dylib
+*.framework
+
+# Rust
+src/rust/target/
+src/rust/Cargo.lock
+
+# iOS
+ios/build/
+*.xcworkspace
+*.xcuserdata
+DerivedData/
+
+# Android
+android/build/
+android/.gradle/
+android/local.properties
+*.apk
+*.aab
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage/
+*.log
+
+# Example app
+examples/*/node_modules/
+examples/*/ios/Pods/
+examples/*/android/build/
+examples/*/android/.gradle/
