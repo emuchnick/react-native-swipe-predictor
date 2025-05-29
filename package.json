@@ -28,7 +28,8 @@
     "build:rust": "npm run build:rust:ios && npm run build:rust:android",
     "prepublishOnly": "npm run build && npm run typescript",
     "example": "cd example && npm start",
-    "test": "jest"
+    "test": "jest",
+    "prepublishonly": "yarn build && yarn build:rust && yarn typescript && yarn lint"
   },
   "keywords": [
     "react-native",

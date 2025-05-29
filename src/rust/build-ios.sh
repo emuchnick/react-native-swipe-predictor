@@ -13,15 +13,23 @@ if ! command -v cargo-lipo &> /dev/null; then
 fi
 
 # Add iOS targets if not already added
-rustup target add aarch64-apple-ios x86_64-apple-ios
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 
-# Build the library
-cargo lipo --release
+# Build the library for simulator (arm64 + x86_64)
+echo "Building for iOS Simulator..."
+cargo lipo --release --targets aarch64-apple-ios-sim,x86_64-apple-ios
 
 # Create output directory
 mkdir -p ../../ios/
 
-# Copy the library
-cp target/universal/release/libswipe_predictor.a ../../ios/
+# Copy the simulator library
+cp target/universal/release/libswipe_predictor.a ../../ios/libswipe_predictor_simulator.a
 
-echo "iOS build complete! Library copied to ios/libswipe_predictor.a"
+# Also build for device if needed
+echo "Building for iOS Device..."
+cargo build --release --target aarch64-apple-ios
+cp target/aarch64-apple-ios/release/libswipe_predictor.a ../../ios/libswipe_predictor_device.a
+
+echo "iOS build complete!"
+echo "Simulator library: ios/libswipe_predictor_simulator.a"
+echo "Device library: ios/libswipe_predictor_device.a"
