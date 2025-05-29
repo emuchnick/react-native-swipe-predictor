@@ -7,6 +7,7 @@ class SwipePredictorModule: RCTEventEmitter {
     private var activePredictors: [Int: PredictorInfo] = [:]
     private var displayLink: CADisplayLink?
     private var context: OpaquePointer?
+    private let contextLock = NSLock()
     
     struct PredictorInfo {
         let handle: OpaquePointer
@@ -18,8 +19,16 @@ class SwipePredictorModule: RCTEventEmitter {
     
     override init() {
         super.init()
+        // Don't initialize here - will do it lazily when first predictor is created
+    }
+    
+    private func ensureContextInitialized() {
+        contextLock.lock()
+        defer { contextLock.unlock() }
         
-        // Initialize panic handler for Rust FFI
+        guard context == nil else { return }
+        
+        // Initialize panic handler for Rust FFI (safe to call multiple times)
         swipe_predictor_init_panic_handler()
         
         // Create a default context with handle-based API
@@ -46,6 +55,8 @@ class SwipePredictorModule: RCTEventEmitter {
                         resolver resolve: @escaping RCTPromiseResolveBlock,
                         rejecter reject: @escaping RCTPromiseRejectBlock) {
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            self?.ensureContextInitialized()
+            
             guard let context = self?.context else {
                 reject("NO_CONTEXT", "SwipePredictor context not initialized", nil)
                 return

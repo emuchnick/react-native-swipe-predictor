@@ -20,6 +20,14 @@ This example demonstrates the capabilities of the `react-native-swipe-predictor`
 
 ### Installation
 
+**Quick Setup (Recommended)**:
+```bash
+cd example
+./setup.sh
+```
+
+**Manual Setup**:
+
 1. Install dependencies:
    ```bash
    cd example
@@ -31,6 +39,11 @@ This example demonstrates the capabilities of the `react-native-swipe-predictor`
    cd ios
    pod install
    cd ..
+   ```
+
+3. **iOS Only - Important**: After pod install, add the following line to `ios/SwipePredictorExample/AppDelegate.h` before `@end`:
+   ```objc
+   - (NSURL *)bundleURL;
    ```
 
 ## Running the Example
@@ -90,6 +103,12 @@ Access via "Run Benchmarks" button to test:
 - Memory usage
 
 ## Troubleshooting
+
+### iOS App Crashes on Launch
+
+If the iOS app crashes immediately with an error about `bundleURL not implemented`:
+- Make sure you've added the method declaration to AppDelegate.h as described in the installation steps
+- Or run the setup.sh script which handles this automatically
 
 ### Build Issues
 
