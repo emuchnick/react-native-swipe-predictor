@@ -20,20 +20,43 @@ pub struct Prediction {
 
 #[derive(Debug, Clone, Copy)]
 pub struct PhysicsConfig {
+    /// Deceleration rate in pixels/second²
     pub deceleration_rate: f64,
+    /// Minimum velocity threshold in pixels/second
     pub min_velocity_threshold: f64,
+    /// Minimum gesture time in milliseconds
     pub min_gesture_time_ms: f64,
+    /// Velocity smoothing factor (0.0 to 1.0)
     pub velocity_smoothing_factor: f64,
 }
 
 impl Default for PhysicsConfig {
     fn default() -> Self {
         PhysicsConfig {
-            deceleration_rate: 1500.0,
-            min_velocity_threshold: 50.0,
-            min_gesture_time_ms: 30.0,
-            velocity_smoothing_factor: 0.7,
+            deceleration_rate: 1500.0,      // pixels/second²
+            min_velocity_threshold: 50.0,    // pixels/second
+            min_gesture_time_ms: 30.0,       // milliseconds
+            velocity_smoothing_factor: 0.7,  // 0.0 to 1.0
         }
+    }
+}
+
+impl PhysicsConfig {
+    /// Validate the physics configuration
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.deceleration_rate <= 0.0 {
+            return Err("Deceleration rate must be positive");
+        }
+        if self.min_velocity_threshold < 0.0 {
+            return Err("Minimum velocity threshold cannot be negative");
+        }
+        if self.min_gesture_time_ms < 0.0 {
+            return Err("Minimum gesture time cannot be negative");
+        }
+        if self.velocity_smoothing_factor < 0.0 || self.velocity_smoothing_factor > 1.0 {
+            return Err("Velocity smoothing factor must be between 0.0 and 1.0");
+        }
+        Ok(())
     }
 }
 
@@ -63,6 +86,18 @@ impl GesturePredictor {
     /// * `y` - Y coordinate in pixels
     /// * `timestamp` - Timestamp in milliseconds
     pub fn add_touch_point(&mut self, x: f64, y: f64, timestamp: f64) {
+        // Validate timestamp
+        if timestamp < 0.0 {
+            return; // Silently ignore invalid timestamps
+        }
+        
+        // Check for timestamp going backwards
+        if let Some(last) = self.touch_buffer.back() {
+            if timestamp < last.timestamp {
+                return; // Ignore out-of-order timestamps
+            }
+        }
+        
         if self.gesture_start_time.is_none() {
             self.gesture_start_time = Some(timestamp);
         }
@@ -272,12 +307,25 @@ impl PredictorManager {
         }
     }
 
+    /// Create a new predictor and return its unique ID
     pub fn create_predictor(&self) -> usize {
         let mut predictors = self.predictors.lock().unwrap();
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let predictor = GesturePredictor::new(self.physics_config);
         predictors.insert(id, predictor);
         id
+    }
+    
+    /// Get the number of active predictors
+    pub fn predictor_count(&self) -> usize {
+        let predictors = self.predictors.lock().unwrap();
+        predictors.len()
+    }
+    
+    /// Check if a predictor exists
+    pub fn predictor_exists(&self, predictor_id: usize) -> bool {
+        let predictors = self.predictors.lock().unwrap();
+        predictors.contains_key(&predictor_id)
     }
 
     pub fn add_touch_point(&self, predictor_id: usize, x: f64, y: f64, timestamp: f64) {
@@ -409,13 +457,43 @@ pub mod android {
 
     #[no_mangle]
     pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeInitManager(
-        _env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
         deceleration_rate: jdouble,
         min_velocity_threshold: jdouble,
         min_gesture_time_ms: jdouble,
         velocity_smoothing_factor: jdouble,
     ) {
+        // Validate parameters
+        if deceleration_rate <= 0.0 {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                "Deceleration rate must be positive"
+            );
+            return;
+        }
+        if min_velocity_threshold < 0.0 {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                "Minimum velocity threshold cannot be negative"
+            );
+            return;
+        }
+        if min_gesture_time_ms < 0.0 {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                "Minimum gesture time cannot be negative"
+            );
+            return;
+        }
+        if velocity_smoothing_factor < 0.0 || velocity_smoothing_factor > 1.0 {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                "Velocity smoothing factor must be between 0.0 and 1.0"
+            );
+            return;
+        }
+        
         init_predictor_manager(
             deceleration_rate as f64,
             min_velocity_threshold as f64,
@@ -426,21 +504,42 @@ pub mod android {
 
     #[no_mangle]
     pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeInitPredictor(
-        _env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
     ) -> jint {
-        init_predictor()
+        let result = init_predictor();
+        if result == -1 {
+            let _ = env.throw_new(
+                "java/lang/IllegalStateException",
+                "PredictorManager not initialized. Call nativeInitManager first."
+            );
+        }
+        result
     }
 
     #[no_mangle]
     pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeAddTouchPoint(
-        _env: JNIEnv,
+        env: JNIEnv,
         _class: JClass,
         predictor_id: jint,
         x: jdouble,
         y: jdouble,
         timestamp: jdouble,
     ) {
+        if predictor_id < 0 {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                &format!("Invalid predictor ID: {}. ID must be non-negative.", predictor_id)
+            );
+            return;
+        }
+        if timestamp < 0.0 {
+            let _ = env.throw_new(
+                "java/lang/IllegalArgumentException",
+                &format!("Invalid timestamp: {}. Timestamp must be non-negative milliseconds.", timestamp)
+            );
+            return;
+        }
         add_touch_point(predictor_id, x as f64, y as f64, timestamp as f64);
     }
 
@@ -465,14 +564,20 @@ pub mod android {
                         &[x.into(), y.into(), confidence.into()],
                     ) {
                         Ok(obj) => obj,
-                        Err(_) => {
-                            let _ = env.throw_new("java/lang/RuntimeException", "Failed to create Prediction object");
+                        Err(e) => {
+                            let _ = env.throw_new(
+                                "java/lang/RuntimeException", 
+                                &format!("Failed to create Prediction object: {:?}", e)
+                            );
                             JObject::null()
                         }
                     }
                 },
-                Err(_) => {
-                    let _ = env.throw_new("java/lang/ClassNotFoundException", "Prediction class not found");
+                Err(e) => {
+                    let _ = env.throw_new(
+                        "java/lang/ClassNotFoundException", 
+                        &format!("Prediction class not found: {:?}. Ensure com.swipepredictor.Prediction exists.", e)
+                    );
                     JObject::null()
                 }
             }
@@ -737,5 +842,79 @@ mod tests {
         ids.sort();
         ids.dedup();
         assert_eq!(ids.len(), 100);
+    }
+
+    #[test]
+    fn test_physics_config_validation() {
+        // Valid config
+        let valid_config = PhysicsConfig::default();
+        assert!(valid_config.validate().is_ok());
+        
+        // Invalid deceleration rate
+        let mut config = PhysicsConfig::default();
+        config.deceleration_rate = -100.0;
+        assert!(config.validate().is_err());
+        
+        // Invalid velocity threshold
+        config = PhysicsConfig::default();
+        config.min_velocity_threshold = -1.0;
+        assert!(config.validate().is_err());
+        
+        // Invalid gesture time
+        config = PhysicsConfig::default();
+        config.min_gesture_time_ms = -10.0;
+        assert!(config.validate().is_err());
+        
+        // Invalid smoothing factor (too low)
+        config = PhysicsConfig::default();
+        config.velocity_smoothing_factor = -0.1;
+        assert!(config.validate().is_err());
+        
+        // Invalid smoothing factor (too high)
+        config = PhysicsConfig::default();
+        config.velocity_smoothing_factor = 1.1;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_timestamp_ordering() {
+        let mut predictor = GesturePredictor::new(PhysicsConfig::default());
+        
+        // Add points with increasing timestamps
+        predictor.add_touch_point(0.0, 0.0, 0.0);
+        predictor.add_touch_point(10.0, 0.0, 10.0);
+        
+        // Try to add a point with timestamp going backwards
+        predictor.add_touch_point(20.0, 0.0, 5.0); // Should be ignored
+        
+        // Add a valid point
+        predictor.add_touch_point(30.0, 0.0, 20.0);
+        
+        // Should only have 3 points (the backwards one was ignored)
+        assert_eq!(predictor.touch_buffer.len(), 3);
+        assert_eq!(predictor.touch_buffer[2].x, 30.0);
+    }
+
+    #[test]
+    fn test_manager_helper_methods() {
+        let manager = PredictorManager::new(PhysicsConfig::default());
+        
+        // Initially no predictors
+        assert_eq!(manager.predictor_count(), 0);
+        
+        // Create some predictors
+        let id1 = manager.create_predictor();
+        let id2 = manager.create_predictor();
+        
+        assert_eq!(manager.predictor_count(), 2);
+        assert!(manager.predictor_exists(id1));
+        assert!(manager.predictor_exists(id2));
+        assert!(!manager.predictor_exists(99999));
+        
+        // Remove one
+        manager.remove_predictor(id1);
+        assert_eq!(manager.predictor_count(), 1);
+        assert!(!manager.predictor_exists(id1));
+        assert!(manager.predictor_exists(id2));
     }
 }
