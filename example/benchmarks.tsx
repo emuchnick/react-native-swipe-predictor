@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
+// @ts-ignore - importing internal module for example
 import { runPerformanceBenchmarks } from '../src/benchmarks/performance';
 
 interface BenchmarkResults {

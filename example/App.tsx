@@ -19,7 +19,7 @@ import Animated, {
   withSpring,
   runOnJS,
 } from "react-native-reanimated";
-import { useSwipePredictor, SwipePredictorDebugOverlay } from "../src"; //This would be replaced with 'react-native-swipe-predictor' in your code
+import { useSwipePredictor, SwipePredictorDebugOverlay } from "react-native-swipe-predictor";
 import BenchmarksScreen from "./benchmarks";
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");

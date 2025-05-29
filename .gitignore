@@ -40,6 +40,16 @@ coverage/
 *.log
 
 # Example app
+example/node_modules/
+example/ios/
+example/android/
+example/.gradle/
+example/build/
+example/.expo/
+example/.expo-shared/
+example/*.log
+example/.bundle/
+example/vendor/bundle/
 examples/*/node_modules/
 examples/*/ios/Pods/
 examples/*/android/build/

@@ -36,29 +36,156 @@ Try out these interactive examples:
 - **[Navigation Drawer](examples/navigation-drawer)** - Smooth drawer with predictive opening/closing
 - **[Image Gallery](examples/image-gallery)** - Gallery with buttery smooth image transitions
 
-## Installation
+## 🚀 5-Minute Setup Guide
 
-### Using npm
+This library uses **Rust** for high-performance calculations, but don't worry! Everything is pre-built and you don't need to know Rust or have any Rust tools installed.
+
+### Prerequisites
+
+- React Native 0.70 or higher
+- iOS 13.0+ / Android 6.0+ (API 23+)
+- [react-native-gesture-handler](https://docs.swmansion.com/react-native-gesture-handler/) (required for gesture handling)
+- [react-native-reanimated](https://docs.swmansion.com/react-native-reanimated/) (required for animations)
+
+### Step 1: Install the Package
 
 ```bash
-npm install react-native-swipe-predictor
+# Using npm
+npm install react-native-swipe-predictor react-native-gesture-handler react-native-reanimated
+
+# Using yarn
+yarn add react-native-swipe-predictor react-native-gesture-handler react-native-reanimated
 ```
 
-### Using yarn
+### Step 2: Platform-Specific Setup
 
-```bash
-yarn add react-native-swipe-predictor
-```
+#### iOS Setup
 
-### iOS Setup
-
+1. Install CocoaPods dependencies:
 ```bash
 cd ios && pod install
 ```
 
-### Android Setup
+2. **Important for M1/M2 Macs**: If you encounter architecture issues:
+```bash
+cd ios && arch -x86_64 pod install
+```
 
-No additional setup required!
+3. Open your project in Xcode and ensure:
+   - Minimum iOS Deployment Target is 13.0 or higher
+   - Build Settings → Enable Bitcode is set to "No"
+
+#### Android Setup
+
+1. Ensure your `android/build.gradle` has:
+```gradle
+buildscript {
+    ext {
+        minSdkVersion = 23  // or higher
+        compileSdkVersion = 33  // or higher
+        targetSdkVersion = 33  // or higher
+    }
+}
+```
+
+2. If you're using React Native 0.73+, no additional setup is needed!
+
+3. For older React Native versions, add to `android/app/build.gradle`:
+```gradle
+android {
+    packagingOptions {
+        pickFirst '**/libc++_shared.so'
+        pickFirst '**/libjsi.so'
+        pickFirst '**/libreact_nativemodule_core.so'
+    }
+}
+```
+
+### Step 3: Verify Installation
+
+Create a test component to verify everything is working:
+
+```tsx
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { useSwipePredictor } from 'react-native-swipe-predictor';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, runOnJS } from 'react-native-reanimated';
+
+function TestSwipe() {
+  const translateX = useSharedValue(0);
+  
+  const { onTouchStart, onTouchMove, onTouchEnd } = useSwipePredictor({
+    onPrediction: ({ x, confidence }) => {
+      'worklet';
+      if (confidence > 0.7) {
+        console.log('Prediction working! X:', x);
+        translateX.value = withSpring(x);
+      }
+    },
+  });
+  
+  const gesture = Gesture.Pan()
+    .onBegin(() => runOnJS(onTouchStart)())
+    .onUpdate((e) => {
+      translateX.value = e.translationX;
+      runOnJS(onTouchMove)(e);
+    })
+    .onEnd(() => {
+      runOnJS(onTouchEnd)();
+      translateX.value = withSpring(0);
+    });
+    
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+  
+  return (
+    <View style={styles.container}>
+      <GestureDetector gesture={gesture}>
+        <Animated.View style={[styles.box, animatedStyle]}>
+          <Text style={styles.text}>Swipe Me!</Text>
+        </Animated.View>
+      </GestureDetector>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  box: {
+    width: 200,
+    height: 200,
+    backgroundColor: '#3498db',
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  text: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+});
+
+export default TestSwipe;
+```
+
+### Step 4: Run Your App
+
+```bash
+# iOS
+npx react-native run-ios
+
+# Android
+npx react-native run-android
+```
+
+If everything is set up correctly, you should be able to swipe the blue box and see it animate smoothly!
 
 ## Quick Start
 

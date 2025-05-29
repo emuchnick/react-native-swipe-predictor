@@ -1,10 +1,13 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use once_cell::sync::Lazy;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TouchPoint {
     pub x: f64,
     pub y: f64,
+    /// Timestamp in milliseconds
     pub timestamp: f64,
 }
 
@@ -53,6 +56,12 @@ impl GesturePredictor {
         }
     }
 
+    /// Add a touch point to the gesture buffer
+    /// 
+    /// # Arguments
+    /// * `x` - X coordinate in pixels
+    /// * `y` - Y coordinate in pixels
+    /// * `timestamp` - Timestamp in milliseconds
     pub fn add_touch_point(&mut self, x: f64, y: f64, timestamp: f64) {
         if self.gesture_start_time.is_none() {
             self.gesture_start_time = Some(timestamp);
@@ -249,58 +258,59 @@ impl GesturePredictor {
 }
 
 pub struct PredictorManager {
-    predictors: Arc<Mutex<Vec<GesturePredictor>>>,
+    predictors: Arc<Mutex<HashMap<usize, GesturePredictor>>>,
     physics_config: PhysicsConfig,
+    next_id: Arc<AtomicUsize>,
 }
 
 impl PredictorManager {
     pub fn new(physics_config: PhysicsConfig) -> Self {
         PredictorManager {
-            predictors: Arc::new(Mutex::new(Vec::new())),
+            predictors: Arc::new(Mutex::new(HashMap::new())),
             physics_config,
+            next_id: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     pub fn create_predictor(&self) -> usize {
         let mut predictors = self.predictors.lock().unwrap();
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let predictor = GesturePredictor::new(self.physics_config);
-        predictors.push(predictor);
-        predictors.len() - 1
+        predictors.insert(id, predictor);
+        id
     }
 
     pub fn add_touch_point(&self, predictor_id: usize, x: f64, y: f64, timestamp: f64) {
         let mut predictors = self.predictors.lock().unwrap();
-        if let Some(predictor) = predictors.get_mut(predictor_id) {
+        if let Some(predictor) = predictors.get_mut(&predictor_id) {
             predictor.add_touch_point(x, y, timestamp);
         }
     }
 
     pub fn get_prediction(&self, predictor_id: usize) -> Option<Prediction> {
         let mut predictors = self.predictors.lock().unwrap();
-        predictors.get_mut(predictor_id)?.get_prediction()
+        predictors.get_mut(&predictor_id)?.get_prediction()
     }
 
     pub fn reset_predictor(&self, predictor_id: usize) {
         let mut predictors = self.predictors.lock().unwrap();
-        if let Some(predictor) = predictors.get_mut(predictor_id) {
+        if let Some(predictor) = predictors.get_mut(&predictor_id) {
             predictor.reset();
         }
     }
 
     pub fn detect_cancellation(&self, predictor_id: usize) -> bool {
         let predictors = self.predictors.lock().unwrap();
-        predictors.get(predictor_id).map_or(false, |p| p.detect_cancellation())
+        predictors.get(&predictor_id).map_or(false, |p| p.detect_cancellation())
     }
 
     pub fn remove_predictor(&self, predictor_id: usize) {
         let mut predictors = self.predictors.lock().unwrap();
-        if predictor_id < predictors.len() {
-            predictors.remove(predictor_id);
-        }
+        predictors.remove(&predictor_id);
     }
 }
 
-static mut PREDICTOR_MANAGER: Option<PredictorManager> = None;
+static PREDICTOR_MANAGER: Lazy<Mutex<Option<PredictorManager>>> = Lazy::new(|| Mutex::new(None));
 
 #[no_mangle]
 pub extern "C" fn init_predictor_manager(
@@ -316,28 +326,25 @@ pub extern "C" fn init_predictor_manager(
         velocity_smoothing_factor,
     };
     
-    unsafe {
-        PREDICTOR_MANAGER = Some(PredictorManager::new(physics_config));
-    }
+    let mut manager = PREDICTOR_MANAGER.lock().unwrap();
+    *manager = Some(PredictorManager::new(physics_config));
 }
 
 #[no_mangle]
 pub extern "C" fn init_predictor() -> i32 {
-    unsafe {
-        if let Some(ref manager) = PREDICTOR_MANAGER {
-            manager.create_predictor() as i32
-        } else {
-            -1
-        }
+    let manager = PREDICTOR_MANAGER.lock().unwrap();
+    if let Some(ref mgr) = *manager {
+        mgr.create_predictor() as i32
+    } else {
+        -1
     }
 }
 
 #[no_mangle]
 pub extern "C" fn add_touch_point(predictor_id: i32, x: f64, y: f64, timestamp: f64) {
-    unsafe {
-        if let Some(ref manager) = PREDICTOR_MANAGER {
-            manager.add_touch_point(predictor_id as usize, x, y, timestamp);
-        }
+    let manager = PREDICTOR_MANAGER.lock().unwrap();
+    if let Some(ref mgr) = *manager {
+        mgr.add_touch_point(predictor_id as usize, x, y, timestamp);
     }
 }
 
@@ -348,46 +355,48 @@ pub extern "C" fn get_prediction(
     out_y: *mut f64,
     out_confidence: *mut f64,
 ) -> i32 {
-    unsafe {
-        if let Some(ref manager) = PREDICTOR_MANAGER {
-            if let Some(prediction) = manager.get_prediction(predictor_id as usize) {
+    if out_x.is_null() || out_y.is_null() || out_confidence.is_null() {
+        return 0;
+    }
+    
+    let manager = PREDICTOR_MANAGER.lock().unwrap();
+    if let Some(ref mgr) = *manager {
+        if let Some(prediction) = mgr.get_prediction(predictor_id as usize) {
+            unsafe {
                 *out_x = prediction.x;
                 *out_y = prediction.y;
                 *out_confidence = prediction.confidence;
-                return 1;
             }
+            return 1;
         }
-        0
     }
+    0
 }
 
 #[no_mangle]
 pub extern "C" fn reset_predictor(predictor_id: i32) {
-    unsafe {
-        if let Some(ref manager) = PREDICTOR_MANAGER {
-            manager.reset_predictor(predictor_id as usize);
-        }
+    let manager = PREDICTOR_MANAGER.lock().unwrap();
+    if let Some(ref mgr) = *manager {
+        mgr.reset_predictor(predictor_id as usize);
     }
 }
 
 #[no_mangle]
 pub extern "C" fn detect_cancellation(predictor_id: i32) -> i32 {
-    unsafe {
-        if let Some(ref manager) = PREDICTOR_MANAGER {
-            if manager.detect_cancellation(predictor_id as usize) {
-                return 1;
-            }
+    let manager = PREDICTOR_MANAGER.lock().unwrap();
+    if let Some(ref mgr) = *manager {
+        if mgr.detect_cancellation(predictor_id as usize) {
+            return 1;
         }
-        0
     }
+    0
 }
 
 #[no_mangle]
 pub extern "C" fn remove_predictor(predictor_id: i32) {
-    unsafe {
-        if let Some(ref manager) = PREDICTOR_MANAGER {
-            manager.remove_predictor(predictor_id as usize);
-        }
+    let manager = PREDICTOR_MANAGER.lock().unwrap();
+    if let Some(ref mgr) = *manager {
+        mgr.remove_predictor(predictor_id as usize);
     }
 }
 
@@ -448,12 +457,25 @@ pub mod android {
         let result = get_prediction(predictor_id, &mut x, &mut y, &mut confidence);
         
         if result == 1 {
-            let prediction_class = env.find_class("com/swipepredictor/Prediction").unwrap();
-            env.new_object(
-                prediction_class,
-                "(DDD)V",
-                &[x.into(), y.into(), confidence.into()],
-            ).unwrap()
+            match env.find_class("com/swipepredictor/Prediction") {
+                Ok(prediction_class) => {
+                    match env.new_object(
+                        prediction_class,
+                        "(DDD)V",
+                        &[x.into(), y.into(), confidence.into()],
+                    ) {
+                        Ok(obj) => obj,
+                        Err(_) => {
+                            let _ = env.throw_new("java/lang/RuntimeException", "Failed to create Prediction object");
+                            JObject::null()
+                        }
+                    }
+                },
+                Err(_) => {
+                    let _ = env.throw_new("java/lang/ClassNotFoundException", "Prediction class not found");
+                    JObject::null()
+                }
+            }
         } else {
             JObject::null()
         }
@@ -490,6 +512,7 @@ pub mod android {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
 
     #[test]
     fn test_gesture_predictor_basic() {
@@ -570,5 +593,149 @@ mod tests {
         assert_eq!(predictor.touch_buffer.len(), 0);
         assert!(predictor.gesture_start_time.is_none());
         assert!(predictor.last_prediction.is_none());
+    }
+
+    #[test]
+    fn test_predictor_manager_id_stability() {
+        let manager = PredictorManager::new(PhysicsConfig::default());
+        
+        // Create multiple predictors
+        let id1 = manager.create_predictor();
+        let id2 = manager.create_predictor();
+        let id3 = manager.create_predictor();
+        
+        // Add some data to each
+        manager.add_touch_point(id1, 0.0, 0.0, 0.0);
+        manager.add_touch_point(id2, 10.0, 10.0, 0.0);
+        manager.add_touch_point(id3, 20.0, 20.0, 0.0);
+        
+        // Remove the middle predictor
+        manager.remove_predictor(id2);
+        
+        // Verify other predictors are still accessible
+        manager.add_touch_point(id1, 5.0, 5.0, 10.0);
+        manager.add_touch_point(id3, 25.0, 25.0, 10.0);
+        
+        // Create a new predictor - should get a new unique ID
+        let id4 = manager.create_predictor();
+        assert!(id4 != id1 && id4 != id2 && id4 != id3);
+        
+        // Verify removed predictor is no longer accessible
+        manager.add_touch_point(id2, 100.0, 100.0, 20.0); // Should do nothing
+        let prediction = manager.get_prediction(id2);
+        assert!(prediction.is_none());
+    }
+
+    #[test]
+    fn test_thread_safe_predictor_manager() {
+        init_predictor_manager(1500.0, 50.0, 30.0, 0.7);
+        
+        let handles: Vec<_> = (0..10).map(|i| {
+            thread::spawn(move || {
+                let predictor_id = init_predictor();
+                assert!(predictor_id >= 0);
+                
+                // Add some points
+                for j in 0..5 {
+                    add_touch_point(
+                        predictor_id,
+                        (i * 10 + j) as f64,
+                        (i * 10 + j) as f64,
+                        (j * 10) as f64,
+                    );
+                }
+                
+                // Try to get prediction
+                let mut x = 0.0;
+                let mut y = 0.0;
+                let mut confidence = 0.0;
+                get_prediction(predictor_id, &mut x, &mut y, &mut confidence);
+                
+                // Clean up
+                remove_predictor(predictor_id);
+            })
+        })
+        .collect();
+        
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_null_pointer_safety() {
+        init_predictor_manager(1500.0, 50.0, 30.0, 0.7);
+        let predictor_id = init_predictor();
+        
+        // Add some points to ensure prediction is possible
+        for i in 0..10 {
+            add_touch_point(predictor_id, i as f64 * 10.0, 0.0, i as f64 * 10.0);
+        }
+        
+        // Test with null pointers
+        let result = get_prediction(predictor_id, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut());
+        assert_eq!(result, 0);
+        
+        // Test with some null pointers
+        let mut x = 0.0;
+        let result = get_prediction(predictor_id, &mut x, std::ptr::null_mut(), std::ptr::null_mut());
+        assert_eq!(result, 0);
+        
+        // Test with valid pointers
+        let mut y = 0.0;
+        let mut confidence = 0.0;
+        let result = get_prediction(predictor_id, &mut x, &mut y, &mut confidence);
+        assert_eq!(result, 1);
+        assert!(x > 0.0);
+        
+        remove_predictor(predictor_id);
+    }
+
+    #[test]
+    fn test_timestamp_validation() {
+        let mut predictor = GesturePredictor::new(PhysicsConfig::default());
+        
+        // Test with proper millisecond timestamps
+        predictor.add_touch_point(0.0, 0.0, 0.0);
+        predictor.add_touch_point(10.0, 0.0, 10.0);
+        predictor.add_touch_point(20.0, 0.0, 20.0);
+        predictor.add_touch_point(30.0, 0.0, 30.0);
+        predictor.add_touch_point(40.0, 0.0, 40.0);
+        
+        let prediction = predictor.get_prediction();
+        assert!(prediction.is_some());
+        
+        // Test with zero dt (identical timestamps)
+        let mut predictor2 = GesturePredictor::new(PhysicsConfig::default());
+        predictor2.add_touch_point(0.0, 0.0, 100.0);
+        predictor2.add_touch_point(10.0, 0.0, 100.0); // Same timestamp
+        predictor2.add_touch_point(20.0, 0.0, 100.0); // Same timestamp
+        predictor2.add_touch_point(30.0, 0.0, 150.0);
+        
+        // Should still work, but with reduced confidence
+        let prediction2 = predictor2.get_prediction();
+        assert!(prediction2.is_some());
+    }
+
+    #[test]
+    fn test_concurrent_predictor_creation() {
+        let manager = PredictorManager::new(PhysicsConfig::default());
+        let manager_arc = Arc::new(manager);
+        
+        let handles: Vec<_> = (0..100).map(|_| {
+            let mgr = manager_arc.clone();
+            thread::spawn(move || {
+                mgr.create_predictor()
+            })
+        }).collect();
+        
+        let mut ids: Vec<usize> = handles.into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+        
+        // All IDs should be unique
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 100);
     }
 }
