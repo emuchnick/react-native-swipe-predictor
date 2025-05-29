@@ -9,7 +9,7 @@ import {
   Platform,
 } from 'react-native';
 // @ts-ignore - importing internal module for example
-import { runPerformanceBenchmarks } from '../src/benchmarks/performance';
+import { runPerformanceBenchmarks } from 'react-native-swipe-predictor/src/benchmarks/performance';
 
 interface BenchmarkResults {
   averageLatency: number;

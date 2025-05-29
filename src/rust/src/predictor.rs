@@ -118,7 +118,10 @@ impl GesturePredictor {
         }
 
         // Get current position
-        let current_point = self.touch_buffer.back().unwrap();
+        let current_point = self.touch_buffer.back().ok_or(PredictorError::InsufficientData {
+            required: 1,
+            actual: 0,
+        })?;
 
         // Calculate stopping distance
         let (distance_x, distance_y, _) = self.physics_config
@@ -139,6 +142,7 @@ impl GesturePredictor {
     fn calculate_gesture_duration(&self) -> Result<f64> {
         match (self.gesture_start_time, self.touch_buffer.back()) {
             (Some(start), Some(last)) => {
+                // Use unwrap_or to handle potential None from duration_since
                 Ok(last.timestamp.duration_since(&start).unwrap_or(0.0))
             }
             _ => Ok(0.0),
@@ -223,8 +227,14 @@ impl GesturePredictor {
             return 1.0;
         }
 
-        let first = &self.touch_buffer.front().unwrap().position;
-        let last = &self.touch_buffer.back().unwrap().position;
+        let first = match self.touch_buffer.front() {
+            Some(point) => &point.position,
+            None => return 1.0,
+        };
+        let last = match self.touch_buffer.back() {
+            Some(point) => &point.position,
+            None => return 1.0,
+        };
 
         let direct_distance = first.distance_to(last);
 
@@ -421,5 +431,58 @@ mod tests {
 
         assert_eq!(predictor.point_count(), 0);
         assert!(!predictor.is_active());
+    }
+
+    #[test]
+    fn test_empty_buffer_handling() {
+        let config = PhysicsConfig::default();
+        let mut predictor = GesturePredictor::new(config).unwrap();
+
+        // Test predict with empty buffer
+        let result = predictor.predict();
+        assert!(matches!(result, Err(PredictorError::InsufficientData { .. })));
+
+        // Test calculate_weighted_velocity with empty buffer
+        let velocity_result = predictor.calculate_weighted_velocity();
+        assert!(matches!(velocity_result, Err(PredictorError::InsufficientData { .. })));
+
+        // Test is_gesture_decelerating with empty buffer
+        assert!(!predictor.is_gesture_decelerating());
+
+        // Test detect_cancellation with empty buffer
+        assert!(!predictor.detect_cancellation());
+
+        // Add only one point
+        let _ = predictor.add_touch_point(0.0, 0.0, 0.0);
+        
+        // Still insufficient for prediction
+        let result = predictor.predict();
+        assert!(matches!(result, Err(PredictorError::InsufficientData { .. })));
+        
+        // Still insufficient for velocity calculation
+        let velocity_result = predictor.calculate_weighted_velocity();
+        assert!(matches!(velocity_result, Err(PredictorError::InsufficientData { .. })));
+    }
+
+    #[test]
+    fn test_get_last_point_safe() {
+        let config = PhysicsConfig::default();
+        let mut predictor = GesturePredictor::new(config).unwrap();
+
+        // Test with multiple points
+        for i in 0..5 {
+            let _ = predictor.add_touch_point(i as f64 * 10.0, 0.0, i as f64 * 10.0);
+        }
+
+        // This should work without panic
+        let prediction = predictor.predict();
+        assert!(prediction.is_ok());
+
+        // Reset to empty
+        predictor.reset();
+
+        // This should handle empty buffer gracefully
+        let prediction = predictor.predict();
+        assert!(matches!(prediction, Err(PredictorError::InsufficientData { .. })));
     }
 }

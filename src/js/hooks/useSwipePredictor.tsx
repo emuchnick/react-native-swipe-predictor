@@ -37,6 +37,11 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
     let mounted = true;
     
     const initializePredictor = async () => {
+      if (!SwipePredictor) {
+        console.warn('SwipePredictor native module is not available');
+        return;
+      }
+      
       try {
         const predictorId = await SwipePredictor.createPredictor({
           updateInterval: updateInterval / 1000, // Convert to seconds
@@ -54,7 +59,7 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
     initializePredictor();
     
     // Set up event listeners
-    const predictionListener = SwipePredictorEventEmitter.addListener(
+    const predictionListener = SwipePredictorEventEmitter?.addListener(
       'onPrediction',
       (event: Prediction & { predictorId: number }) => {
         if (event.predictorId === predictorIdRef.current) {
@@ -87,7 +92,7 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
       }
     );
     
-    const cancellationListener = SwipePredictorEventEmitter.addListener(
+    const cancellationListener = SwipePredictorEventEmitter?.addListener(
       'onCancellation',
       (event: { predictorId: number }) => {
         if (event.predictorId === predictorIdRef.current) {
@@ -99,10 +104,10 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
     
     return () => {
       mounted = false;
-      predictionListener.remove();
-      cancellationListener.remove();
+      predictionListener?.remove();
+      cancellationListener?.remove();
       
-      if (predictorIdRef.current !== null) {
+      if (predictorIdRef.current !== null && SwipePredictor) {
         SwipePredictor.removePredictor(predictorIdRef.current);
       }
     };
@@ -120,7 +125,7 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
       touchPointsRef.current = [];
       frameCountRef.current = 0;
       
-      if (predictorIdRef.current !== null) {
+      if (predictorIdRef.current !== null && SwipePredictor) {
         SwipePredictor.resetPredictor(predictorIdRef.current);
       }
     })();
@@ -135,7 +140,7 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
     const timestamp = Date.now() - startTimeRef.current; // Convert to ms since start
     
     runOnJS(() => {
-      if (predictorIdRef.current !== null) {
+      if (predictorIdRef.current !== null && SwipePredictor) {
         SwipePredictor.addTouchPoint(
           predictorIdRef.current,
           translationX as number,

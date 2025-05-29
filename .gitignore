@@ -12,6 +12,7 @@ target/
 
 # Rust
 src/rust/target/
+src/rust/target-check/
 src/rust/Cargo.lock
 
 # iOS

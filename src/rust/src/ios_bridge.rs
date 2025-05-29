@@ -1,7 +1,7 @@
 // iOS Bridge - Maps legacy function names to new context-based API
 use crate::ffi::{SwipePredictorContext, SwipePredictorHandle};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, Once};
 
 // Wrapper to make the raw pointer Send + Sync
 struct ContextPtr(*mut SwipePredictorContext);
@@ -34,8 +34,14 @@ impl HandleStorage {
 use std::sync::OnceLock;
 
 static IOS_STORAGE: OnceLock<Mutex<HandleStorage>> = OnceLock::new();
+static INIT_ONCE: Once = Once::new();
 
 fn get_storage() -> &'static Mutex<HandleStorage> {
+    // Initialize panic handler on first access
+    INIT_ONCE.call_once(|| {
+        crate::ffi::swipe_predictor_init_panic_handler();
+    });
+    
     IOS_STORAGE.get_or_init(|| Mutex::new(HandleStorage::new()))
 }
 

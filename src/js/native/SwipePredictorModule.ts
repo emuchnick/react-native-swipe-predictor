@@ -21,7 +21,7 @@ interface SwipePredictorModuleInterface {
 const { SwipePredictorModule } = NativeModules;
 
 if (!SwipePredictorModule) {
-  throw new Error(
+  console.error(
     'SwipePredictorModule is not available. ' +
     'Make sure you have properly linked the native module and rebuilt your app.'
   );
@@ -29,7 +29,9 @@ if (!SwipePredictorModule) {
 
 export const SwipePredictor = SwipePredictorModule as SwipePredictorModuleInterface;
 
-export const SwipePredictorEventEmitter = new NativeEventEmitter(SwipePredictorModule);
+export const SwipePredictorEventEmitter = SwipePredictorModule 
+  ? new NativeEventEmitter(SwipePredictorModule) 
+  : null;
 
 export const PHYSICS_PRESETS = {
   ios: {

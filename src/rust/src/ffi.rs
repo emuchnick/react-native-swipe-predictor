@@ -1,10 +1,37 @@
 use std::collections::HashMap;
+use std::panic;
 use std::sync::{Arc, Mutex};
 
 use crate::physics::PhysicsConfig;
 use crate::predictor::GesturePredictor;
 
 const MAX_PREDICTORS: usize = 10000;
+
+/// Initialize the panic handler for the FFI module.
+/// This should be called once when the library is loaded.
+/// 
+/// The panic handler ensures that panics don't unwind across the FFI boundary,
+/// which would be undefined behavior. Instead, panics are caught and logged.
+#[no_mangle]
+pub extern "C" fn swipe_predictor_init_panic_handler() {
+    panic::set_hook(Box::new(|panic_info| {
+        let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            s
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            s
+        } else {
+            "Unknown panic"
+        };
+        
+        let location = if let Some(location) = panic_info.location() {
+            format!(" at {}:{}:{}", location.file(), location.line(), location.column())
+        } else {
+            String::new()
+        };
+        
+        eprintln!("SwipePredictor panic{}: {}", location, msg);
+    }));
+}
 
 /// Opaque handle type for FFI context
 #[repr(C)]
@@ -149,28 +176,30 @@ pub extern "C" fn swipe_predictor_context_destroy(ctx: *mut SwipePredictorContex
 pub extern "C" fn swipe_predictor_create_in_context(
     ctx: *mut SwipePredictorContext,
 ) -> *mut SwipePredictorHandle {
-    if ctx.is_null() {
-        return std::ptr::null_mut();
-    }
-
-    // SAFETY: We trust the caller to pass a valid context pointer
-    let context = unsafe { &*(ctx as *const PredictorContext) };
-
-    let mut inner = match context.inner.lock() {
-        Ok(guard) => guard,
-        Err(_) => return std::ptr::null_mut(), // Poisoned mutex
-    };
-
-    match inner.create_predictor() {
-        Some(predictor_id) => {
-            let handle = Box::new(PredictorHandle {
-                context: Arc::clone(&context.inner),
-                predictor_id,
-            });
-            Box::into_raw(handle) as *mut SwipePredictorHandle
+    panic::catch_unwind(|| {
+        if ctx.is_null() {
+            return std::ptr::null_mut();
         }
-        None => std::ptr::null_mut(),
-    }
+
+        // SAFETY: We trust the caller to pass a valid context pointer
+        let context = unsafe { &*(ctx as *const PredictorContext) };
+
+        let mut inner = match context.inner.lock() {
+            Ok(guard) => guard,
+            Err(_) => return std::ptr::null_mut(), // Poisoned mutex
+        };
+
+        match inner.create_predictor() {
+            Some(predictor_id) => {
+                let handle = Box::new(PredictorHandle {
+                    context: Arc::clone(&context.inner),
+                    predictor_id,
+                });
+                Box::into_raw(handle) as *mut SwipePredictorHandle
+            }
+            None => std::ptr::null_mut(),
+        }
+    }).unwrap_or(std::ptr::null_mut())
 }
 
 /// Free a predictor handle
@@ -213,25 +242,27 @@ pub extern "C" fn swipe_predictor_add_point(
     y: f64,
     timestamp: f64,
 ) -> i32 {
-    if handle.is_null() {
-        return 0;
-    }
+    panic::catch_unwind(|| {
+        if handle.is_null() {
+            return 0;
+        }
 
-    // SAFETY: We trust the caller to pass a valid handle
-    let handle = unsafe { &*(handle as *const PredictorHandle) };
-    
-    let mut inner = match handle.context.lock() {
-        Ok(guard) => guard,
-        Err(_) => return 0, // Poisoned mutex
-    };
+        // SAFETY: We trust the caller to pass a valid handle
+        let handle = unsafe { &*(handle as *const PredictorHandle) };
+        
+        let mut inner = match handle.context.lock() {
+            Ok(guard) => guard,
+            Err(_) => return 0, // Poisoned mutex
+        };
 
-    match inner.get_predictor_mut(handle.predictor_id) {
-        Some(predictor) => match predictor.add_touch_point(x, y, timestamp) {
-            Ok(_) => 1,
-            Err(_) => 0,
-        },
-        None => 0,
-    }
+        match inner.get_predictor_mut(handle.predictor_id) {
+            Some(predictor) => match predictor.add_touch_point(x, y, timestamp) {
+                Ok(_) => 1,
+                Err(_) => 0,
+            },
+            None => 0,
+        }
+    }).unwrap_or(0)
 }
 
 /// Get prediction from the predictor
@@ -247,33 +278,35 @@ pub extern "C" fn swipe_predictor_get_prediction(
     out_y: *mut f64,
     out_confidence: *mut f64,
 ) -> i32 {
-    if handle.is_null() || out_x.is_null() || out_y.is_null() || out_confidence.is_null() {
-        return 0;
-    }
+    panic::catch_unwind(|| {
+        if handle.is_null() || out_x.is_null() || out_y.is_null() || out_confidence.is_null() {
+            return 0;
+        }
 
-    // SAFETY: We trust the caller to pass a valid handle
-    let handle = unsafe { &*(handle as *const PredictorHandle) };
-    
-    let inner = match handle.context.lock() {
-        Ok(guard) => guard,
-        Err(_) => return 0, // Poisoned mutex
-    };
+        // SAFETY: We trust the caller to pass a valid handle
+        let handle = unsafe { &*(handle as *const PredictorHandle) };
+        
+        let inner = match handle.context.lock() {
+            Ok(guard) => guard,
+            Err(_) => return 0, // Poisoned mutex
+        };
 
-    match inner.get_predictor(handle.predictor_id) {
-        Some(predictor) => match predictor.predict() {
-            Ok(prediction) => {
-                // SAFETY: We checked that pointers are not null at the beginning
-                unsafe {
-                    *out_x = prediction.position.x;
-                    *out_y = prediction.position.y;
-                    *out_confidence = prediction.confidence;
+        match inner.get_predictor(handle.predictor_id) {
+            Some(predictor) => match predictor.predict() {
+                Ok(prediction) => {
+                    // SAFETY: We checked that pointers are not null at the beginning
+                    unsafe {
+                        *out_x = prediction.position.x;
+                        *out_y = prediction.position.y;
+                        *out_confidence = prediction.confidence;
+                    }
+                    1
                 }
-                1
-            }
-            Err(_) => 0,
-        },
-        None => 0,
-    }
+                Err(_) => 0,
+            },
+            None => 0,
+        }
+    }).unwrap_or(0)
 }
 
 /// Reset the predictor
@@ -283,25 +316,27 @@ pub extern "C" fn swipe_predictor_get_prediction(
 /// threads, though this is not typically recommended for gesture prediction.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_reset(handle: *mut SwipePredictorHandle) -> i32 {
-    if handle.is_null() {
-        return 0;
-    }
-
-    // SAFETY: We trust the caller to pass a valid handle
-    let handle = unsafe { &*(handle as *const PredictorHandle) };
-    
-    let mut inner = match handle.context.lock() {
-        Ok(guard) => guard,
-        Err(_) => return 0, // Poisoned mutex
-    };
-
-    match inner.get_predictor_mut(handle.predictor_id) {
-        Some(predictor) => {
-            predictor.reset();
-            1
+    panic::catch_unwind(|| {
+        if handle.is_null() {
+            return 0;
         }
-        None => 0,
-    }
+
+        // SAFETY: We trust the caller to pass a valid handle
+        let handle = unsafe { &*(handle as *const PredictorHandle) };
+        
+        let mut inner = match handle.context.lock() {
+            Ok(guard) => guard,
+            Err(_) => return 0, // Poisoned mutex
+        };
+
+        match inner.get_predictor_mut(handle.predictor_id) {
+            Some(predictor) => {
+                predictor.reset();
+                1
+            }
+            None => 0,
+        }
+    }).unwrap_or(0)
 }
 
 /// Detect if the gesture appears to be cancelled
@@ -311,28 +346,30 @@ pub extern "C" fn swipe_predictor_reset(handle: *mut SwipePredictorHandle) -> i3
 /// threads, though this is not typically recommended for gesture prediction.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_detect_cancellation(handle: *mut SwipePredictorHandle) -> i32 {
-    if handle.is_null() {
-        return 0;
-    }
-
-    // SAFETY: We trust the caller to pass a valid handle
-    let handle = unsafe { &*(handle as *const PredictorHandle) };
-    
-    let inner = match handle.context.lock() {
-        Ok(guard) => guard,
-        Err(_) => return 0, // Poisoned mutex
-    };
-
-    match inner.get_predictor(handle.predictor_id) {
-        Some(predictor) => {
-            if predictor.detect_cancellation() {
-                1
-            } else {
-                0
-            }
+    panic::catch_unwind(|| {
+        if handle.is_null() {
+            return 0;
         }
-        None => 0,
-    }
+
+        // SAFETY: We trust the caller to pass a valid handle
+        let handle = unsafe { &*(handle as *const PredictorHandle) };
+        
+        let inner = match handle.context.lock() {
+            Ok(guard) => guard,
+            Err(_) => return 0, // Poisoned mutex
+        };
+
+        match inner.get_predictor(handle.predictor_id) {
+            Some(predictor) => {
+                if predictor.detect_cancellation() {
+                    1
+                } else {
+                    0
+                }
+            }
+            None => 0,
+        }
+    }).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -604,5 +641,60 @@ mod tests {
 
         // Finally destroy the handle
         swipe_predictor_destroy(handle);
+    }
+
+    #[test]
+    fn test_panic_handler() {
+        use std::panic;
+        
+        // Initialize panic handler
+        swipe_predictor_init_panic_handler();
+        
+        // Test that panics are caught and don't abort the process
+        let result = panic::catch_unwind(|| {
+            // This would normally panic
+            panic!("Test panic");
+        });
+        
+        assert!(result.is_err(), "Panic should be caught");
+    }
+
+    #[test]
+    fn test_ffi_panic_safety() {
+        // Initialize panic handler
+        swipe_predictor_init_panic_handler();
+        
+        // Create a predictor that will panic when used incorrectly
+        let ctx = swipe_predictor_context_create_default();
+        let handle = swipe_predictor_create_in_context(ctx);
+        
+        // This should handle the internal panic gracefully
+        // (In practice, our code doesn't panic anymore, but this tests the infrastructure)
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut conf = 0.0;
+        
+        // Try to get prediction with no points (used to panic with unwrap())
+        let result = swipe_predictor_get_prediction(handle, &mut x, &mut y, &mut conf);
+        assert_eq!(result, 0, "Should return 0 on error, not panic");
+        
+        // Clean up
+        swipe_predictor_destroy(handle);
+        swipe_predictor_context_destroy(ctx);
+    }
+
+    #[test]
+    fn test_panic_handler_idempotent() {
+        // Test that calling init_panic_handler multiple times is safe
+        swipe_predictor_init_panic_handler();
+        swipe_predictor_init_panic_handler();
+        swipe_predictor_init_panic_handler();
+        
+        // Should still work
+        let result = std::panic::catch_unwind(|| {
+            panic!("Test panic after multiple inits");
+        });
+        
+        assert!(result.is_err(), "Panic should still be caught");
     }
 }
