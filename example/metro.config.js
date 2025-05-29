@@ -1,14 +1,12 @@
-const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const path = require('path');
+const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
 
 const root = path.resolve(__dirname, '..');
 const appDir = __dirname;
 
 /**
  * Metro configuration
- * https://reactnative.dev/docs/metro
- *
- * @type {import('@react-native/metro-config').MetroConfig}
+ * https://facebook.github.io/metro/docs/configuration
  */
 const config = {
   watchFolders: [root, appDir],
