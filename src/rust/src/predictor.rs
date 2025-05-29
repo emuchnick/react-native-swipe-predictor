@@ -4,12 +4,25 @@ use crate::error::{PredictorError, Result};
 use crate::physics::PhysicsConfig;
 use crate::types::{Point2D, Prediction, Timestamp, TouchPoint, Velocity2D};
 
+/// Minimum number of touch points needed to calculate velocity
 const MIN_BUFFER_SIZE: usize = 2;
+
+/// Maximum number of touch points to keep in memory to prevent unbounded growth
 const MAX_BUFFER_SIZE: usize = 100;
+
+/// Default buffer size that balances memory usage with prediction accuracy
 const DEFAULT_BUFFER_SIZE: usize = 10;
 
+/// Factor by which speed must decrease between samples to be considered decelerating
+/// 0.9 = speed must be less than 90% of previous speed (10% decrease required)
 const DECELERATION_FACTOR: f64 = 0.9;
+
+/// Speed in pixels/second that represents maximum confidence
+/// Based on typical fast swipe speeds on mobile devices
 const SPEED_CONFIDENCE_SCALE: f64 = 500.0;
+
+/// Duration in milliseconds above minimum that represents maximum confidence
+/// 100ms above minimum gives full duration confidence
 const DURATION_CONFIDENCE_SCALE: f64 = 100.0;
 
 pub struct GesturePredictor {
@@ -145,28 +158,28 @@ impl GesturePredictor {
         let mut total_weight = 0.0;
 
         let n = self.touch_buffer.len();
-        let points: Vec<&TouchPoint> = self.touch_buffer.iter().collect();
+        let mut prev_point: Option<&TouchPoint> = None;
+        
+        for (i, curr) in self.touch_buffer.iter().enumerate() {
+            if let Some(prev) = prev_point {
+                if let Some(dt) = curr.timestamp.duration_since(&prev.timestamp) {
+                    if dt > 0.0 {
+                        if let Some(velocity) = Velocity2D::from_points_and_time(
+                            prev.position,
+                            curr.position,
+                            dt,
+                        ) {
+                            // Weight more recent velocities higher
+                            let weight = ((i as f64) / (n as f64)).powi(2);
 
-        for i in 1..n {
-            let prev = &points[i - 1];
-            let curr = &points[i];
-
-            if let Some(dt) = curr.timestamp.duration_since(&prev.timestamp) {
-                if dt > 0.0 {
-                    if let Some(velocity) = Velocity2D::from_points_and_time(
-                        prev.position,
-                        curr.position,
-                        dt,
-                    ) {
-                        // Weight more recent velocities higher
-                        let weight = (i as f64 / n as f64).powi(2);
-
-                        total_velocity_x += velocity.x * weight;
-                        total_velocity_y += velocity.y * weight;
-                        total_weight += weight;
+                            total_velocity_x += velocity.x * weight;
+                            total_velocity_y += velocity.y * weight;
+                            total_weight += weight;
+                        }
                     }
                 }
             }
+            prev_point = Some(curr);
         }
 
         if total_weight > 0.0 {
@@ -220,10 +233,13 @@ impl GesturePredictor {
         }
 
         let mut path_distance = 0.0;
-        let points: Vec<&TouchPoint> = self.touch_buffer.iter().collect();
-
-        for i in 1..points.len() {
-            path_distance += points[i - 1].position.distance_to(&points[i].position);
+        let mut prev_pos: Option<&Point2D> = None;
+        
+        for point in &self.touch_buffer {
+            if let Some(prev) = prev_pos {
+                path_distance += prev.distance_to(&point.position);
+            }
+            prev_pos = Some(&point.position);
         }
 
         (direct_distance / path_distance).clamp(0.0, 1.0)
@@ -237,17 +253,20 @@ impl GesturePredictor {
         let n = self.touch_buffer.len();
         let start_idx = n.saturating_sub(4);
 
-        let mut recent_speeds = Vec::new();
-        let points: Vec<&TouchPoint> = self.touch_buffer.iter().skip(start_idx).collect();
-
-        for i in 1..points.len() {
-            if let Some(dt) = points[i].timestamp.duration_since(&points[i - 1].timestamp) {
-                if dt > 0.0 {
-                    let distance = points[i - 1].position.distance_to(&points[i].position);
-                    let speed = distance / dt * 1000.0; // Convert to pixels/second
-                    recent_speeds.push(speed);
+        let mut recent_speeds = Vec::with_capacity(3);
+        let mut prev_point: Option<&TouchPoint> = None;
+        
+        for point in self.touch_buffer.iter().skip(start_idx) {
+            if let Some(prev) = prev_point {
+                if let Some(dt) = point.timestamp.duration_since(&prev.timestamp) {
+                    if dt > 0.0 {
+                        let distance = prev.position.distance_to(&point.position);
+                        let speed = distance / dt * 1000.0; // Convert to pixels/second
+                        recent_speeds.push(speed);
+                    }
                 }
             }
+            prev_point = Some(point);
         }
 
         if recent_speeds.len() >= 2 {
@@ -269,13 +288,11 @@ impl GesturePredictor {
             return false;
         }
 
-        let points: Vec<&TouchPoint> = self.touch_buffer.iter().collect();
-        let n = points.len();
-
-        // Check for direction reversal
-        if n >= 3 {
-            let v1 = points[n - 2].position - points[n - 3].position;
-            let v2 = points[n - 1].position - points[n - 2].position;
+        // Check for direction reversal using the last 3 points
+        let mut recent_points = self.touch_buffer.iter().rev().take(3);
+        if let (Some(p3), Some(p2), Some(p1)) = (recent_points.next(), recent_points.next(), recent_points.next()) {
+            let v1 = p2.position - p1.position;
+            let v2 = p3.position - p2.position;
 
             // Dot product < 0 means angle > 90 degrees
             let dot_product = v1.x * v2.x + v1.y * v2.y;
