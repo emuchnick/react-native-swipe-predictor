@@ -17,5 +17,5 @@
     "jsx": "react-native"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "lib", "examples"]
+  "exclude": ["node_modules", "lib", "usage-examples"]
 }

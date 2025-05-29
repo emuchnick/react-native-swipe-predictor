@@ -34,6 +34,7 @@ android/local.properties
 *.swo
 *~
 .DS_Store
+NPM_PUBLISHING.md
 
 # Testing
 coverage/

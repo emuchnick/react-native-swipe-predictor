@@ -1,39 +1,94 @@
-# Example app
+# Example app and demos
 example/
-examples/
+usage-examples/
 
 # Rust source (only built artifacts are needed)
 src/rust/src/
 src/rust/target/
 src/rust/Cargo.lock
+src/rust/Cargo.toml
 src/rust/build-android.sh
 src/rust/build-ios.sh
 
-# Development files
+# Development and config files
 .gitignore
+.gitattributes
 .eslintrc.js
 .prettierrc
 tsconfig.json
 jest.config.js
+babel.config.js
+.editorconfig
+.watchmanconfig
 
-# Documentation assets
+# Documentation (except README.md)
 docs/
+CONTRIBUTING.md
+CLAUDE.md
+NPM_PUBLISHING.md
 
-# IDE
+# IDE and editor files
 .vscode/
 .idea/
+*.iml
+.project
+.settings/
+*.swp
+*.swo
+*~
 
-# Tests
+# Tests and benchmarks
 __tests__/
+__mocks__/
+__fixtures__/
 *.test.ts
 *.test.tsx
+*.test.js
+*.test.jsx
 *.spec.ts
 *.spec.tsx
+src/benchmarks/
 
-# Build artifacts
+# Build artifacts and logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 .DS_Store
+Thumbs.db
+coverage/
+.nyc_output/
 
 # Temporary files
 tmp/
 temp/
+.cache/
+
+# Git and source control
+.git/
+.github/
+.gitlab/
+.svn/
+.hg/
+
+# CI/CD
+.circleci/
+.travis.yml
+.gitlab-ci.yml
+azure-pipelines.yml
+appveyor.yml
+
+# Package manager files (keep package.json)
+yarn.lock
+.yarn/
+.yarnrc
+pnpm-lock.yaml
+.pnpm-store/
+
+# Already ignored by npm
+node_modules/
+
+# Misc
+*.tgz
+.env
+.env.*
