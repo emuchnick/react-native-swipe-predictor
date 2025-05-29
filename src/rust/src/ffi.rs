@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use crate::physics::PhysicsConfig;
 use crate::predictor::GesturePredictor;
@@ -18,13 +19,13 @@ pub struct SwipePredictorHandle {
 }
 
 /// Internal state for a predictor context
-struct PredictorContext {
+struct PredictorContextInner {
     predictors: HashMap<u32, GesturePredictor>,
     next_id: u32,
     physics_config: PhysicsConfig,
 }
 
-impl PredictorContext {
+impl PredictorContextInner {
     fn new(physics_config: PhysicsConfig) -> Self {
         Self {
             predictors: HashMap::new(),
@@ -63,13 +64,33 @@ impl PredictorContext {
     }
 }
 
-/// Combined handle that stores both context and predictor ID
+/// Context wrapper that uses Arc for safe shared ownership
+struct PredictorContext {
+    inner: Arc<Mutex<PredictorContextInner>>,
+}
+
+impl PredictorContext {
+    fn new(physics_config: PhysicsConfig) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(PredictorContextInner::new(physics_config))),
+        }
+    }
+}
+
+/// Combined handle that safely shares ownership of the context
 struct PredictorHandle {
-    context: *mut PredictorContext,
+    context: Arc<Mutex<PredictorContextInner>>,
     predictor_id: u32,
 }
 
 /// Create a new swipe predictor context with the given physics configuration
+/// 
+/// # Thread Safety
+/// The returned context is thread-safe. Multiple threads can safely create
+/// predictors from the same context simultaneously.
+/// 
+/// # Returns
+/// Returns a context handle on success, or null on invalid configuration.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_context_create(
     deceleration_rate: f64,
@@ -92,13 +113,22 @@ pub extern "C" fn swipe_predictor_context_create(
 }
 
 /// Create a new swipe predictor context with default physics configuration
+/// 
+/// # Thread Safety
+/// The returned context is thread-safe. Multiple threads can safely create
+/// predictors from the same context simultaneously.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_context_create_default() -> *mut SwipePredictorContext {
     let context = Box::new(PredictorContext::new(PhysicsConfig::default()));
     Box::into_raw(context) as *mut SwipePredictorContext
 }
 
-/// Free a swipe predictor context and all its predictors
+/// Free a swipe predictor context
+/// 
+/// # Safety
+/// All handles created from this context remain valid and safe to use
+/// even after the context is destroyed, thanks to Arc-based reference counting.
+/// However, no new predictors can be created from the context after destruction.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_context_destroy(ctx: *mut SwipePredictorContext) {
     if ctx.is_null() {
@@ -112,6 +142,9 @@ pub extern "C" fn swipe_predictor_context_destroy(ctx: *mut SwipePredictorContex
 }
 
 /// Create a new predictor within the context
+/// 
+/// # Thread Safety
+/// This function is thread-safe when called with the same context from multiple threads.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_create_in_context(
     ctx: *mut SwipePredictorContext,
@@ -121,12 +154,17 @@ pub extern "C" fn swipe_predictor_create_in_context(
     }
 
     // SAFETY: We trust the caller to pass a valid context pointer
-    let context = unsafe { &mut *(ctx as *mut PredictorContext) };
+    let context = unsafe { &*(ctx as *const PredictorContext) };
 
-    match context.create_predictor() {
+    let mut inner = match context.inner.lock() {
+        Ok(guard) => guard,
+        Err(_) => return std::ptr::null_mut(), // Poisoned mutex
+    };
+
+    match inner.create_predictor() {
         Some(predictor_id) => {
             let handle = Box::new(PredictorHandle {
-                context: context as *mut PredictorContext,
+                context: Arc::clone(&context.inner),
                 predictor_id,
             });
             Box::into_raw(handle) as *mut SwipePredictorHandle
@@ -136,6 +174,10 @@ pub extern "C" fn swipe_predictor_create_in_context(
 }
 
 /// Free a predictor handle
+/// 
+/// # Safety
+/// The handle remains safe to use until this function is called,
+/// even if the original context has been destroyed.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_destroy(handle: *mut SwipePredictorHandle) {
     if handle.is_null() {
@@ -146,12 +188,24 @@ pub extern "C" fn swipe_predictor_destroy(handle: *mut SwipePredictorHandle) {
     let handle = unsafe { Box::from_raw(handle as *mut PredictorHandle) };
 
     // Remove the predictor from the context
-    // SAFETY: The context pointer came from a valid context that should still be alive
-    let context = unsafe { &mut *handle.context };
-    context.remove_predictor(handle.predictor_id);
+    let context = Arc::clone(&handle.context);
+    let predictor_id = handle.predictor_id;
+    
+    // Drop the handle first
+    drop(handle);
+    
+    // Then try to remove the predictor
+    if let Ok(mut inner) = context.lock() {
+        inner.remove_predictor(predictor_id);
+    };
+    // If mutex is poisoned, it's not a problem since we're cleaning up
 }
 
 /// Add a touch point to the predictor
+/// 
+/// # Thread Safety
+/// This function is thread-safe. The same handle can be used from multiple
+/// threads, though this is not typically recommended for gesture prediction.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_add_point(
     handle: *mut SwipePredictorHandle,
@@ -166,10 +220,12 @@ pub extern "C" fn swipe_predictor_add_point(
     // SAFETY: We trust the caller to pass a valid handle
     let handle = unsafe { &*(handle as *const PredictorHandle) };
     
-    // SAFETY: The context pointer should be valid as long as the handle is valid
-    let context = unsafe { &mut *handle.context };
+    let mut inner = match handle.context.lock() {
+        Ok(guard) => guard,
+        Err(_) => return 0, // Poisoned mutex
+    };
 
-    match context.get_predictor_mut(handle.predictor_id) {
+    match inner.get_predictor_mut(handle.predictor_id) {
         Some(predictor) => match predictor.add_touch_point(x, y, timestamp) {
             Ok(_) => 1,
             Err(_) => 0,
@@ -179,6 +235,10 @@ pub extern "C" fn swipe_predictor_add_point(
 }
 
 /// Get prediction from the predictor
+/// 
+/// # Thread Safety
+/// This function is thread-safe. The same handle can be used from multiple
+/// threads, though this is not typically recommended for gesture prediction.
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn swipe_predictor_get_prediction(
@@ -194,10 +254,12 @@ pub extern "C" fn swipe_predictor_get_prediction(
     // SAFETY: We trust the caller to pass a valid handle
     let handle = unsafe { &*(handle as *const PredictorHandle) };
     
-    // SAFETY: The context pointer should be valid as long as the handle is valid
-    let context = unsafe { &*handle.context };
+    let inner = match handle.context.lock() {
+        Ok(guard) => guard,
+        Err(_) => return 0, // Poisoned mutex
+    };
 
-    match context.get_predictor(handle.predictor_id) {
+    match inner.get_predictor(handle.predictor_id) {
         Some(predictor) => match predictor.predict() {
             Ok(prediction) => {
                 // SAFETY: We checked that pointers are not null at the beginning
@@ -215,6 +277,10 @@ pub extern "C" fn swipe_predictor_get_prediction(
 }
 
 /// Reset the predictor
+/// 
+/// # Thread Safety
+/// This function is thread-safe. The same handle can be used from multiple
+/// threads, though this is not typically recommended for gesture prediction.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_reset(handle: *mut SwipePredictorHandle) -> i32 {
     if handle.is_null() {
@@ -224,10 +290,12 @@ pub extern "C" fn swipe_predictor_reset(handle: *mut SwipePredictorHandle) -> i3
     // SAFETY: We trust the caller to pass a valid handle
     let handle = unsafe { &*(handle as *const PredictorHandle) };
     
-    // SAFETY: The context pointer should be valid as long as the handle is valid
-    let context = unsafe { &mut *handle.context };
+    let mut inner = match handle.context.lock() {
+        Ok(guard) => guard,
+        Err(_) => return 0, // Poisoned mutex
+    };
 
-    match context.get_predictor_mut(handle.predictor_id) {
+    match inner.get_predictor_mut(handle.predictor_id) {
         Some(predictor) => {
             predictor.reset();
             1
@@ -237,6 +305,10 @@ pub extern "C" fn swipe_predictor_reset(handle: *mut SwipePredictorHandle) -> i3
 }
 
 /// Detect if the gesture appears to be cancelled
+/// 
+/// # Thread Safety
+/// This function is thread-safe. The same handle can be used from multiple
+/// threads, though this is not typically recommended for gesture prediction.
 #[no_mangle]
 pub extern "C" fn swipe_predictor_detect_cancellation(handle: *mut SwipePredictorHandle) -> i32 {
     if handle.is_null() {
@@ -246,10 +318,12 @@ pub extern "C" fn swipe_predictor_detect_cancellation(handle: *mut SwipePredicto
     // SAFETY: We trust the caller to pass a valid handle
     let handle = unsafe { &*(handle as *const PredictorHandle) };
     
-    // SAFETY: The context pointer should be valid as long as the handle is valid
-    let context = unsafe { &*handle.context };
+    let inner = match handle.context.lock() {
+        Ok(guard) => guard,
+        Err(_) => return 0, // Poisoned mutex
+    };
 
-    match context.get_predictor(handle.predictor_id) {
+    match inner.get_predictor(handle.predictor_id) {
         Some(predictor) => {
             if predictor.detect_cancellation() {
                 1
@@ -484,5 +558,51 @@ mod tests {
         // Clean up
         swipe_predictor_destroy(handle);
         swipe_predictor_context_destroy(ctx);
+    }
+
+    #[test]
+    fn test_use_after_context_destroyed() {
+        // This test verifies that handles remain valid even after the context is destroyed
+        // This is the critical safety issue we fixed with Arc-based reference counting
+        
+        let ctx = swipe_predictor_context_create_default();
+        let handle = swipe_predictor_create_in_context(ctx);
+
+        // Add some initial points
+        swipe_predictor_add_point(handle, 0.0, 0.0, 0.0);
+        swipe_predictor_add_point(handle, 10.0, 0.0, 10.0);
+
+        // *** CRITICAL TEST: Destroy context while handle is still alive ***
+        swipe_predictor_context_destroy(ctx);
+
+        // Handle should still work because it holds its own Arc reference
+        for i in 2..6 {
+            let result = swipe_predictor_add_point(
+                handle,
+                i as f64 * 10.0,
+                0.0,
+                i as f64 * 10.0,
+            );
+            assert_eq!(result, 1, "Adding point {} should succeed", i);
+        }
+
+        // Should be able to get predictions
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut confidence = 0.0;
+        let result = swipe_predictor_get_prediction(handle, &mut x, &mut y, &mut confidence);
+        assert_eq!(result, 1, "Getting prediction should succeed");
+        assert!(x > 40.0, "Prediction should be reasonable: x={}", x);
+
+        // Should be able to reset
+        let result = swipe_predictor_reset(handle);
+        assert_eq!(result, 1, "Reset should succeed");
+
+        // Should be able to detect cancellation
+        let result = swipe_predictor_detect_cancellation(handle);
+        assert_eq!(result, 0, "Cancellation detection should work");
+
+        // Finally destroy the handle
+        swipe_predictor_destroy(handle);
     }
 }
