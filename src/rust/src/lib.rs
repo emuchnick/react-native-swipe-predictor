@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use once_cell::sync::Lazy;
 
@@ -26,8 +26,6 @@ pub struct PhysicsConfig {
     pub min_velocity_threshold: f64,
     /// Minimum gesture time in milliseconds
     pub min_gesture_time_ms: f64,
-    /// Velocity smoothing factor (0.0 to 1.0)
-    pub velocity_smoothing_factor: f64,
 }
 
 impl Default for PhysicsConfig {
@@ -36,7 +34,6 @@ impl Default for PhysicsConfig {
             deceleration_rate: 1500.0,      // pixels/second²
             min_velocity_threshold: 50.0,    // pixels/second
             min_gesture_time_ms: 30.0,       // milliseconds
-            velocity_smoothing_factor: 0.7,  // 0.0 to 1.0
         }
     }
 }
@@ -53,9 +50,6 @@ impl PhysicsConfig {
         if self.min_gesture_time_ms < 0.0 {
             return Err("Minimum gesture time cannot be negative");
         }
-        if self.velocity_smoothing_factor < 0.0 || self.velocity_smoothing_factor > 1.0 {
-            return Err("Velocity smoothing factor must be between 0.0 and 1.0");
-        }
         Ok(())
     }
 }
@@ -68,11 +62,20 @@ pub struct GesturePredictor {
     last_prediction: Option<Prediction>,
 }
 
+const MIN_BUFFER_SIZE: usize = 2;
+const MAX_BUFFER_SIZE: usize = 100;
+const MAX_PREDICTORS: usize = 10000;
+
 impl GesturePredictor {
     pub fn new(physics_config: PhysicsConfig) -> Self {
+        Self::with_buffer_size(physics_config, 10)
+    }
+    
+    pub fn with_buffer_size(physics_config: PhysicsConfig, buffer_size: usize) -> Self {
+        let buffer_size = buffer_size.clamp(MIN_BUFFER_SIZE, MAX_BUFFER_SIZE);
         GesturePredictor {
-            touch_buffer: VecDeque::with_capacity(10),
-            buffer_size: 10,
+            touch_buffer: VecDeque::with_capacity(buffer_size),
+            buffer_size,
             physics_config,
             gesture_start_time: None,
             last_prediction: None,
@@ -140,8 +143,12 @@ impl GesturePredictor {
         let current_point = self.touch_buffer.back()?;
         let time_to_stop = speed / self.physics_config.deceleration_rate;
         
-        let distance_x = velocity_x * time_to_stop - 0.5 * (velocity_x / speed) * self.physics_config.deceleration_rate * time_to_stop * time_to_stop;
-        let distance_y = velocity_y * time_to_stop - 0.5 * (velocity_y / speed) * self.physics_config.deceleration_rate * time_to_stop * time_to_stop;
+        // Safe division by avoiding direct division by speed
+        let normalized_vx = if speed > f64::EPSILON { velocity_x / speed } else { 0.0 };
+        let normalized_vy = if speed > f64::EPSILON { velocity_y / speed } else { 0.0 };
+        
+        let distance_x = velocity_x * time_to_stop - 0.5 * normalized_vx * self.physics_config.deceleration_rate * time_to_stop * time_to_stop;
+        let distance_y = velocity_y * time_to_stop - 0.5 * normalized_vy * self.physics_config.deceleration_rate * time_to_stop * time_to_stop;
 
         let predicted_x = current_point.x + distance_x;
         let predicted_y = current_point.y + distance_y;
@@ -167,15 +174,15 @@ impl GesturePredictor {
         let mut total_velocity_y = 0.0;
         let mut total_weight = 0.0;
 
-        let points: Vec<_> = self.touch_buffer.iter().cloned().collect();
-        let n = points.len();
-
-        for i in 1..n {
-            let dt = points[i].timestamp - points[i-1].timestamp;
+        let n = self.touch_buffer.len();
+        let mut prev_point = self.touch_buffer[0];
+        
+        for (i, point) in self.touch_buffer.iter().enumerate().skip(1) {
+            let dt = point.timestamp - prev_point.timestamp;
             if dt > 0.0 {
                 // Convert from pixels/ms to pixels/second
-                let vx = (points[i].x - points[i-1].x) / dt * 1000.0;
-                let vy = (points[i].y - points[i-1].y) / dt * 1000.0;
+                let vx = (point.x - prev_point.x) / dt * 1000.0;
+                let vy = (point.y - prev_point.y) / dt * 1000.0;
                 
                 let weight = (i as f64 / n as f64).powf(2.0);
                 
@@ -183,6 +190,7 @@ impl GesturePredictor {
                 total_velocity_y += vy * weight;
                 total_weight += weight;
             }
+            prev_point = *point;
         }
 
         if total_weight > 0.0 {
@@ -210,9 +218,8 @@ impl GesturePredictor {
             return 1.0;
         }
 
-        let points: Vec<_> = self.touch_buffer.iter().cloned().collect();
-        let first = &points[0];
-        let last = &points[points.len() - 1];
+        let first = self.touch_buffer.front().unwrap();
+        let last = self.touch_buffer.back().unwrap();
         
         let direct_distance = ((last.x - first.x).powi(2) + (last.y - first.y).powi(2)).sqrt();
         
@@ -221,10 +228,13 @@ impl GesturePredictor {
         }
 
         let mut path_distance = 0.0;
-        for i in 1..points.len() {
-            let dx = points[i].x - points[i-1].x;
-            let dy = points[i].y - points[i-1].y;
+        let mut prev_point = first;
+        
+        for point in self.touch_buffer.iter().skip(1) {
+            let dx = point.x - prev_point.x;
+            let dy = point.y - prev_point.y;
             path_distance += (dx*dx + dy*dy).sqrt();
+            prev_point = point;
         }
 
         (direct_distance / path_distance).min(1.0).max(0.0)
@@ -235,20 +245,25 @@ impl GesturePredictor {
             return false;
         }
 
-        let points: Vec<_> = self.touch_buffer.iter().cloned().collect();
-        let n = points.len();
+        let n = self.touch_buffer.len();
+        let start_idx = n.saturating_sub(4);
         
         let mut recent_speeds = Vec::new();
-        for i in (n.saturating_sub(4))..n {
-            if i > 0 {
-                let dt = points[i].timestamp - points[i-1].timestamp;
-                if dt > 0.0 {
-                    let dx = points[i].x - points[i-1].x;
-                    let dy = points[i].y - points[i-1].y;
-                    let speed = ((dx*dx + dy*dy).sqrt()) / dt * 1000.0;
-                    recent_speeds.push(speed);
+        let mut prev_point: Option<&TouchPoint> = None;
+        
+        for (i, point) in self.touch_buffer.iter().enumerate() {
+            if i >= start_idx {
+                if let Some(prev) = prev_point {
+                    let dt = point.timestamp - prev.timestamp;
+                    if dt > 0.0 {
+                        let dx = point.x - prev.x;
+                        let dy = point.y - prev.y;
+                        let speed = ((dx*dx + dy*dy).sqrt()) / dt * 1000.0;
+                        recent_speeds.push(speed);
+                    }
                 }
             }
+            prev_point = Some(point);
         }
 
         if recent_speeds.len() >= 2 {
@@ -269,10 +284,10 @@ impl GesturePredictor {
             return false;
         }
 
-        let points: Vec<_> = self.touch_buffer.iter().cloned().collect();
-        let n = points.len();
+        let n = self.touch_buffer.len();
         
         if n >= 3 {
+            let points: Vec<&TouchPoint> = self.touch_buffer.iter().collect();
             let v1_x = points[n-2].x - points[n-3].x;
             let v1_y = points[n-2].y - points[n-3].y;
             let v2_x = points[n-1].x - points[n-2].x;
@@ -293,7 +308,7 @@ impl GesturePredictor {
 }
 
 pub struct PredictorManager {
-    predictors: Arc<Mutex<HashMap<usize, GesturePredictor>>>,
+    predictors: Arc<RwLock<HashMap<usize, GesturePredictor>>>,
     physics_config: PhysicsConfig,
     next_id: Arc<AtomicUsize>,
 }
@@ -301,60 +316,76 @@ pub struct PredictorManager {
 impl PredictorManager {
     pub fn new(physics_config: PhysicsConfig) -> Self {
         PredictorManager {
-            predictors: Arc::new(Mutex::new(HashMap::new())),
+            predictors: Arc::new(RwLock::new(HashMap::new())),
             physics_config,
             next_id: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     /// Create a new predictor and return its unique ID
-    pub fn create_predictor(&self) -> usize {
-        let mut predictors = self.predictors.lock().unwrap();
+    pub fn create_predictor(&self) -> Result<usize, &'static str> {
+        let mut predictors = self.predictors.write().unwrap();
+        
+        // Check predictor limit
+        if predictors.len() >= MAX_PREDICTORS {
+            return Err("Maximum number of predictors reached");
+        }
+        
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let predictor = GesturePredictor::new(self.physics_config);
         predictors.insert(id, predictor);
-        id
+        Ok(id)
     }
     
     /// Get the number of active predictors
     pub fn predictor_count(&self) -> usize {
-        let predictors = self.predictors.lock().unwrap();
+        let predictors = self.predictors.read().unwrap();
         predictors.len()
     }
     
     /// Check if a predictor exists
     pub fn predictor_exists(&self, predictor_id: usize) -> bool {
-        let predictors = self.predictors.lock().unwrap();
+        let predictors = self.predictors.read().unwrap();
         predictors.contains_key(&predictor_id)
     }
 
-    pub fn add_touch_point(&self, predictor_id: usize, x: f64, y: f64, timestamp: f64) {
-        let mut predictors = self.predictors.lock().unwrap();
+    pub fn add_touch_point(&self, predictor_id: usize, x: f64, y: f64, timestamp: f64) -> Result<(), &'static str> {
+        let mut predictors = self.predictors.write().unwrap();
         if let Some(predictor) = predictors.get_mut(&predictor_id) {
             predictor.add_touch_point(x, y, timestamp);
+            Ok(())
+        } else {
+            Err("Predictor not found")
         }
     }
 
     pub fn get_prediction(&self, predictor_id: usize) -> Option<Prediction> {
-        let mut predictors = self.predictors.lock().unwrap();
+        let mut predictors = self.predictors.write().unwrap();
         predictors.get_mut(&predictor_id)?.get_prediction()
     }
 
-    pub fn reset_predictor(&self, predictor_id: usize) {
-        let mut predictors = self.predictors.lock().unwrap();
+    pub fn reset_predictor(&self, predictor_id: usize) -> Result<(), &'static str> {
+        let mut predictors = self.predictors.write().unwrap();
         if let Some(predictor) = predictors.get_mut(&predictor_id) {
             predictor.reset();
+            Ok(())
+        } else {
+            Err("Predictor not found")
         }
     }
 
     pub fn detect_cancellation(&self, predictor_id: usize) -> bool {
-        let predictors = self.predictors.lock().unwrap();
+        let predictors = self.predictors.read().unwrap();
         predictors.get(&predictor_id).map_or(false, |p| p.detect_cancellation())
     }
 
-    pub fn remove_predictor(&self, predictor_id: usize) {
-        let mut predictors = self.predictors.lock().unwrap();
-        predictors.remove(&predictor_id);
+    pub fn remove_predictor(&self, predictor_id: usize) -> Result<(), &'static str> {
+        let mut predictors = self.predictors.write().unwrap();
+        if predictors.remove(&predictor_id).is_some() {
+            Ok(())
+        } else {
+            Err("Predictor not found")
+        }
     }
 }
 
@@ -365,34 +396,53 @@ pub extern "C" fn init_predictor_manager(
     deceleration_rate: f64,
     min_velocity_threshold: f64,
     min_gesture_time_ms: f64,
-    velocity_smoothing_factor: f64,
-) {
+    _velocity_smoothing_factor: f64, // Kept for ABI compatibility
+) -> i32 {
     let physics_config = PhysicsConfig {
         deceleration_rate,
         min_velocity_threshold,
         min_gesture_time_ms,
-        velocity_smoothing_factor,
     };
     
+    // Validate config
+    if let Err(_) = physics_config.validate() {
+        return 0;
+    }
+    
     let mut manager = PREDICTOR_MANAGER.lock().unwrap();
+    if manager.is_some() {
+        return 0; // Already initialized
+    }
     *manager = Some(PredictorManager::new(physics_config));
+    1
 }
 
 #[no_mangle]
 pub extern "C" fn init_predictor() -> i32 {
     let manager = PREDICTOR_MANAGER.lock().unwrap();
     if let Some(ref mgr) = *manager {
-        mgr.create_predictor() as i32
+        match mgr.create_predictor() {
+            Ok(id) => id as i32,
+            Err(_) => -1,
+        }
     } else {
         -1
     }
 }
 
 #[no_mangle]
-pub extern "C" fn add_touch_point(predictor_id: i32, x: f64, y: f64, timestamp: f64) {
+pub extern "C" fn add_touch_point(predictor_id: i32, x: f64, y: f64, timestamp: f64) -> i32 {
+    if predictor_id < 0 {
+        return 0;
+    }
     let manager = PREDICTOR_MANAGER.lock().unwrap();
     if let Some(ref mgr) = *manager {
-        mgr.add_touch_point(predictor_id as usize, x, y, timestamp);
+        match mgr.add_touch_point(predictor_id as usize, x, y, timestamp) {
+            Ok(_) => 1,
+            Err(_) => 0,
+        }
+    } else {
+        0
     }
 }
 
@@ -422,10 +472,18 @@ pub extern "C" fn get_prediction(
 }
 
 #[no_mangle]
-pub extern "C" fn reset_predictor(predictor_id: i32) {
+pub extern "C" fn reset_predictor(predictor_id: i32) -> i32 {
+    if predictor_id < 0 {
+        return 0;
+    }
     let manager = PREDICTOR_MANAGER.lock().unwrap();
     if let Some(ref mgr) = *manager {
-        mgr.reset_predictor(predictor_id as usize);
+        match mgr.reset_predictor(predictor_id as usize) {
+            Ok(_) => 1,
+            Err(_) => 0,
+        }
+    } else {
+        0
     }
 }
 
@@ -441,10 +499,18 @@ pub extern "C" fn detect_cancellation(predictor_id: i32) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn remove_predictor(predictor_id: i32) {
+pub extern "C" fn remove_predictor(predictor_id: i32) -> i32 {
+    if predictor_id < 0 {
+        return 0;
+    }
     let manager = PREDICTOR_MANAGER.lock().unwrap();
     if let Some(ref mgr) = *manager {
-        mgr.remove_predictor(predictor_id as usize);
+        match mgr.remove_predictor(predictor_id as usize) {
+            Ok(_) => 1,
+            Err(_) => 0,
+        }
+    } else {
+        0
     }
 }
 
@@ -462,7 +528,7 @@ pub mod android {
         deceleration_rate: jdouble,
         min_velocity_threshold: jdouble,
         min_gesture_time_ms: jdouble,
-        velocity_smoothing_factor: jdouble,
+        _velocity_smoothing_factor: jdouble, // Kept for ABI compatibility
     ) {
         // Validate parameters
         if deceleration_rate <= 0.0 {
@@ -486,20 +552,21 @@ pub mod android {
             );
             return;
         }
-        if velocity_smoothing_factor < 0.0 || velocity_smoothing_factor > 1.0 {
-            let _ = env.throw_new(
-                "java/lang/IllegalArgumentException",
-                "Velocity smoothing factor must be between 0.0 and 1.0"
-            );
-            return;
-        }
+        // velocity_smoothing_factor is no longer used but kept for ABI compatibility
         
-        init_predictor_manager(
+        let result = init_predictor_manager(
             deceleration_rate as f64,
             min_velocity_threshold as f64,
             min_gesture_time_ms as f64,
-            velocity_smoothing_factor as f64,
+            _velocity_smoothing_factor as f64,
         );
+        
+        if result == 0 {
+            let _ = env.throw_new(
+                "java/lang/IllegalStateException",
+                "Failed to initialize PredictorManager. It may already be initialized or parameters are invalid."
+            );
+        }
     }
 
     #[no_mangle]
@@ -540,7 +607,10 @@ pub mod android {
             );
             return;
         }
-        add_touch_point(predictor_id, x as f64, y as f64, timestamp as f64);
+        let result = add_touch_point(predictor_id, x as f64, y as f64, timestamp as f64);
+        if result == 0 {
+            // Predictor doesn't exist - don't throw, just silently ignore for backward compatibility
+        }
     }
 
     #[no_mangle]
@@ -592,7 +662,7 @@ pub mod android {
         _class: JClass,
         predictor_id: jint,
     ) {
-        reset_predictor(predictor_id);
+        let _ = reset_predictor(predictor_id);
     }
 
     #[no_mangle]
@@ -610,7 +680,7 @@ pub mod android {
         _class: JClass,
         predictor_id: jint,
     ) {
-        remove_predictor(predictor_id);
+        let _ = remove_predictor(predictor_id);
     }
 }
 
@@ -705,28 +775,28 @@ mod tests {
         let manager = PredictorManager::new(PhysicsConfig::default());
         
         // Create multiple predictors
-        let id1 = manager.create_predictor();
-        let id2 = manager.create_predictor();
-        let id3 = manager.create_predictor();
+        let id1 = manager.create_predictor().unwrap();
+        let id2 = manager.create_predictor().unwrap();
+        let id3 = manager.create_predictor().unwrap();
         
         // Add some data to each
-        manager.add_touch_point(id1, 0.0, 0.0, 0.0);
-        manager.add_touch_point(id2, 10.0, 10.0, 0.0);
-        manager.add_touch_point(id3, 20.0, 20.0, 0.0);
+        let _ = manager.add_touch_point(id1, 0.0, 0.0, 0.0);
+        let _ = manager.add_touch_point(id2, 10.0, 10.0, 0.0);
+        let _ = manager.add_touch_point(id3, 20.0, 20.0, 0.0);
         
         // Remove the middle predictor
-        manager.remove_predictor(id2);
+        let _ = manager.remove_predictor(id2);
         
         // Verify other predictors are still accessible
-        manager.add_touch_point(id1, 5.0, 5.0, 10.0);
-        manager.add_touch_point(id3, 25.0, 25.0, 10.0);
+        let _ = manager.add_touch_point(id1, 5.0, 5.0, 10.0);
+        let _ = manager.add_touch_point(id3, 25.0, 25.0, 10.0);
         
         // Create a new predictor - should get a new unique ID
-        let id4 = manager.create_predictor();
+        let id4 = manager.create_predictor().unwrap();
         assert!(id4 != id1 && id4 != id2 && id4 != id3);
         
         // Verify removed predictor is no longer accessible
-        manager.add_touch_point(id2, 100.0, 100.0, 20.0); // Should do nothing
+        let _ = manager.add_touch_point(id2, 100.0, 100.0, 20.0); // Should fail
         let prediction = manager.get_prediction(id2);
         assert!(prediction.is_none());
     }
@@ -835,7 +905,7 @@ mod tests {
         }).collect();
         
         let mut ids: Vec<usize> = handles.into_iter()
-            .map(|h| h.join().unwrap())
+            .map(|h| h.join().unwrap().unwrap())
             .collect();
         
         // All IDs should be unique
@@ -865,15 +935,7 @@ mod tests {
         config.min_gesture_time_ms = -10.0;
         assert!(config.validate().is_err());
         
-        // Invalid smoothing factor (too low)
-        config = PhysicsConfig::default();
-        config.velocity_smoothing_factor = -0.1;
-        assert!(config.validate().is_err());
-        
-        // Invalid smoothing factor (too high)
-        config = PhysicsConfig::default();
-        config.velocity_smoothing_factor = 1.1;
-        assert!(config.validate().is_err());
+        // Config validation no longer checks smoothing factor (removed)
     }
 
     #[test]
@@ -903,8 +965,8 @@ mod tests {
         assert_eq!(manager.predictor_count(), 0);
         
         // Create some predictors
-        let id1 = manager.create_predictor();
-        let id2 = manager.create_predictor();
+        let id1 = manager.create_predictor().unwrap();
+        let id2 = manager.create_predictor().unwrap();
         
         assert_eq!(manager.predictor_count(), 2);
         assert!(manager.predictor_exists(id1));
@@ -912,9 +974,175 @@ mod tests {
         assert!(!manager.predictor_exists(99999));
         
         // Remove one
-        manager.remove_predictor(id1);
+        let _ = manager.remove_predictor(id1);
         assert_eq!(manager.predictor_count(), 1);
         assert!(!manager.predictor_exists(id1));
         assert!(manager.predictor_exists(id2));
+    }
+    
+    #[test]
+    fn test_division_by_zero_protection() {
+        let mut predictor = GesturePredictor::new(PhysicsConfig::default());
+        
+        // Add points with zero velocity (same position)
+        predictor.add_touch_point(10.0, 10.0, 0.0);
+        predictor.add_touch_point(10.0, 10.0, 50.0);
+        predictor.add_touch_point(10.0, 10.0, 100.0);
+        
+        // Should not panic and return None due to zero velocity
+        let prediction = predictor.get_prediction();
+        assert!(prediction.is_none());
+    }
+    
+    #[test]
+    fn test_manager_reinitialization_prevented() {
+        // Reset the global manager
+        {
+            let mut manager = PREDICTOR_MANAGER.lock().unwrap();
+            *manager = None;
+        }
+        
+        // First initialization should succeed
+        let result1 = init_predictor_manager(1500.0, 50.0, 30.0, 0.7);
+        assert_eq!(result1, 1);
+        
+        // Second initialization should fail
+        let result2 = init_predictor_manager(2000.0, 60.0, 40.0, 0.8);
+        assert_eq!(result2, 0);
+        
+        // Verify original config is still in use
+        let predictor_id = init_predictor();
+        assert!(predictor_id >= 0);
+    }
+    
+    #[test]
+    fn test_predictor_limit() {
+        let manager = PredictorManager::new(PhysicsConfig::default());
+        let mut ids = Vec::new();
+        
+        // Create predictors up to the limit
+        for _ in 0..MAX_PREDICTORS {
+            match manager.create_predictor() {
+                Ok(id) => ids.push(id),
+                Err(_) => break,
+            }
+        }
+        
+        // Should have created MAX_PREDICTORS
+        assert_eq!(ids.len(), MAX_PREDICTORS);
+        
+        // Next creation should fail
+        let result = manager.create_predictor();
+        assert!(result.is_err());
+        
+        // Remove one and try again
+        let _ = manager.remove_predictor(ids[0]);
+        let result = manager.create_predictor();
+        assert!(result.is_ok());
+    }
+    
+    #[test]
+    fn test_buffer_size_validation() {
+        let config = PhysicsConfig::default();
+        
+        // Test minimum buffer size
+        let predictor1 = GesturePredictor::with_buffer_size(config, 0);
+        assert_eq!(predictor1.buffer_size, MIN_BUFFER_SIZE);
+        
+        // Test maximum buffer size
+        let predictor2 = GesturePredictor::with_buffer_size(config, 1000);
+        assert_eq!(predictor2.buffer_size, MAX_BUFFER_SIZE);
+        
+        // Test normal buffer size
+        let predictor3 = GesturePredictor::with_buffer_size(config, 20);
+        assert_eq!(predictor3.buffer_size, 20);
+    }
+    
+    #[test]
+    fn test_error_handling_invalid_predictor_ids() {
+        let manager = PredictorManager::new(PhysicsConfig::default());
+        
+        // Test with non-existent predictor
+        let result = manager.add_touch_point(999, 10.0, 10.0, 0.0);
+        assert!(result.is_err());
+        
+        let result = manager.reset_predictor(999);
+        assert!(result.is_err());
+        
+        let result = manager.remove_predictor(999);
+        assert!(result.is_err());
+        
+        // Test with negative ID through FFI
+        let result = add_touch_point(-1, 10.0, 10.0, 0.0);
+        assert_eq!(result, 0);
+        
+        let result = reset_predictor(-1);
+        assert_eq!(result, 0);
+        
+        let result = remove_predictor(-1);
+        assert_eq!(result, 0);
+    }
+    
+    #[test]
+    fn test_physics_config_edge_cases() {
+        // Test zero deceleration rate
+        let mut config = PhysicsConfig::default();
+        config.deceleration_rate = 0.0;
+        assert!(config.validate().is_err());
+        
+        // Test negative deceleration rate
+        config.deceleration_rate = -100.0;
+        assert!(config.validate().is_err());
+        
+        // Test edge case values
+        config = PhysicsConfig {
+            deceleration_rate: f64::EPSILON,
+            min_velocity_threshold: 0.0,
+            min_gesture_time_ms: 0.0,
+        };
+        assert!(config.validate().is_ok());
+    }
+    
+    #[test]
+    fn test_concurrent_read_operations() {
+        let manager = Arc::new(PredictorManager::new(PhysicsConfig::default()));
+        let id = manager.create_predictor().unwrap();
+        
+        // Add some data
+        for i in 0..10 {
+            let _ = manager.add_touch_point(id, i as f64 * 10.0, 0.0, i as f64 * 10.0);
+        }
+        
+        // Spawn multiple readers
+        let handles: Vec<_> = (0..10).map(|_| {
+            let mgr = manager.clone();
+            thread::spawn(move || {
+                for _ in 0..100 {
+                    // These should not block each other with RwLock
+                    let _ = mgr.predictor_exists(id);
+                    let _ = mgr.predictor_count();
+                    let _ = mgr.detect_cancellation(id);
+                }
+            })
+        }).collect();
+        
+        // Wait for all threads
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+    
+    #[test]
+    fn test_velocity_calculation_without_allocation() {
+        let mut predictor = GesturePredictor::new(PhysicsConfig::default());
+        
+        // Add many points to test performance
+        for i in 0..100 {
+            predictor.add_touch_point(i as f64, i as f64, i as f64 * 10.0);
+        }
+        
+        // This should work efficiently without allocating Vec
+        let velocity = predictor.calculate_weighted_velocity();
+        assert!(velocity.is_some());
     }
 }
