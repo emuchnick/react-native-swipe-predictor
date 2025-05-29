@@ -1,7 +1,7 @@
 {
   "name": "react-native-swipe-predictor",
-  "version": "1.0.0",
-  "description": "Physics-based gesture predictor for React Native apps",
+  "version": "0.1.0",
+  "description": "Create impossibly responsive swipe interactions by predicting where gestures will end",
   "main": "lib/commonjs/index",
   "module": "lib/module/index",
   "types": "lib/typescript/index.d.ts",
@@ -12,15 +12,21 @@
     "lib",
     "android",
     "ios",
-    "rn-swipe-predictor.podspec"
+    "react-native-swipe-predictor.podspec",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__",
+    "!**/.*"
   ],
   "scripts": {
     "typescript": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint \"**/*.{js,ts,tsx}\"",
     "build": "bob build",
     "build:rust:ios": "cd src/rust && cargo lipo --release",
     "build:rust:android": "cd src/rust && ./build-android.sh",
     "build:rust": "npm run build:rust:ios && npm run build:rust:android",
+    "prepublishOnly": "npm run build && npm run typescript",
     "example": "cd example && npm start",
     "test": "jest"
   },
@@ -31,18 +37,24 @@
     "gesture",
     "swipe",
     "prediction",
-    "physics"
+    "physics",
+    "animation",
+    "performance",
+    "ux",
+    "touch",
+    "reanimated",
+    "gesture-handler"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/react-native-swipe-predictor.git"
+    "url": "git+https://github.com/emuchnick/react-native-swipe-predictor.git"
   },
-  "author": "Your Name <email@example.com>",
+  "author": "Ethan Muchnick <erraticios@gmail.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/yourusername/react-native-swipe-predictor/issues"
+    "url": "https://github.com/emuchnick/react-native-swipe-predictor/issues"
   },
-  "homepage": "https://github.com/yourusername/react-native-swipe-predictor#readme",
+  "homepage": "https://github.com/emuchnick/react-native-swipe-predictor#readme",
   "peerDependencies": {
     "react": "*",
     "react-native": "*",

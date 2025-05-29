@@ -1,0 +1,39 @@
+# Example app
+example/
+examples/
+
+# Rust source (only built artifacts are needed)
+src/rust/src/
+src/rust/target/
+src/rust/Cargo.lock
+src/rust/build-android.sh
+src/rust/build-ios.sh
+
+# Development files
+.gitignore
+.eslintrc.js
+.prettierrc
+tsconfig.json
+jest.config.js
+
+# Documentation assets
+docs/
+
+# IDE
+.vscode/
+.idea/
+
+# Tests
+__tests__/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+
+# Build artifacts
+*.log
+.DS_Store
+
+# Temporary files
+tmp/
+temp/
