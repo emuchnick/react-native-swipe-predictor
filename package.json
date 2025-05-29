@@ -22,7 +22,7 @@
     "typescript": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"**/*.{js,ts,tsx}\"",
-    "build": "bob build",
+    "build": "bob build && node scripts/postbuild.js",
     "build:rust:ios": "cd src/rust && cargo lipo --release",
     "build:rust:android": "cd src/rust && ./build-android.sh",
     "build:rust": "npm run build:rust:ios && npm run build:rust:android",
@@ -72,6 +72,8 @@
     "react": "^18.0.0",
     "react-native": "^0.72.0",
     "react-native-builder-bob": "^0.20.0",
+    "react-native-gesture-handler": "^2.25.0",
+    "react-native-reanimated": "^3.18.0",
     "typescript": "^5.0.0"
   },
   "react-native-builder-bob": {
