@@ -189,6 +189,8 @@ If everything is set up correctly, you should be able to swipe the blue box and 
 
 ## Quick Start
 
+Once installed, here's a minimal example:
+
 ```tsx
 import { useSwipePredictor } from "react-native-swipe-predictor";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -342,26 +344,109 @@ const swipePredictor = useSwipePredictor({
 });
 ```
 
-## Troubleshooting
+## 🔧 Troubleshooting
 
-### Common Issues
+### Common Setup Issues
+
+#### iOS Build Errors
+
+**"Module 'SwipePredictor' not found"**
+```bash
+# Solution 1: Clean and reinstall
+cd ios
+pod deintegrate
+pod install
+
+# Solution 2: Clear caches
+cd ..
+rm -rf ~/Library/Developer/Xcode/DerivedData
+npx react-native clean
+```
+
+**"Undefined symbols for architecture arm64"**
+- This means the Rust library wasn't linked properly
+- Ensure you ran `pod install` after installing the package
+- Check that your Podfile doesn't exclude arm64 architectures
+
+**Build fails on M1/M2 Mac**
+```bash
+# Install pods with Rosetta
+cd ios
+sudo arch -x86_64 gem install ffi
+arch -x86_64 pod install
+```
+
+#### Android Build Errors
+
+**"libreact-native-swipe-predictor.so not found"**
+- Clean and rebuild:
+```bash
+cd android
+./gradlew clean
+cd ..
+npx react-native run-android
+```
+
+**"Duplicate libc++_shared.so" errors**
+- Add to `android/app/build.gradle`:
+```gradle
+android {
+    packagingOptions {
+        pickFirst '**/libc++_shared.so'
+        pickFirst '**/libjsi.so'
+    }
+}
+```
+
+**Minimum SDK version errors**
+- Update `android/build.gradle`:
+```gradle
+minSdkVersion = 23  // Must be 23 or higher
+```
+
+#### Runtime Issues
+
+**"Cannot read property 'createPredictor' of undefined"**
+- The native module didn't link properly
+- For React Native 0.60+: Run `npx react-native unlink react-native-swipe-predictor` then reinstall
+- For older versions: Manually link following the [manual linking guide](https://reactnative.dev/docs/linking-libraries-ios)
+
+**App crashes on launch**
+- Ensure you've installed required peer dependencies:
+```bash
+npm list react-native-gesture-handler react-native-reanimated
+```
+- Follow the [gesture-handler installation guide](https://docs.swmansion.com/react-native-gesture-handler/docs/installation)
+- Follow the [reanimated installation guide](https://docs.swmansion.com/react-native-reanimated/docs/fundamentals/installation)
 
 **Predictions seem delayed**
-
 - Ensure you're using worklets for `onPrediction`
 - Check that frame rate isn't being limited by other operations
+- Try reducing `updateInterval` to 8ms for 120Hz displays
 
 **Confidence is always low**
-
 - User might be making erratic movements
 - Try adjusting the physics parameters
 - Ensure touch events are being forwarded correctly
 
-**Module not found errors**
+### Still Having Issues?
 
-- Run `cd ios && pod install`
-- Clean and rebuild your project
-- Check that auto-linking worked correctly
+1. **Check our [GitHub Issues](https://github.com/emuchnick/react-native-swipe-predictor/issues)** - Someone might have already solved your problem
+2. **Enable debug mode** to see what's happening:
+```tsx
+const swipePredictor = useSwipePredictor({
+  debug: true,
+  onPrediction: (prediction) => {
+    console.log('Prediction:', prediction);
+  }
+});
+```
+3. **Create a minimal reproduction** - This helps identify if the issue is with the library or your setup
+4. **Open an issue** with:
+   - Your React Native version
+   - Platform (iOS/Android)
+   - Complete error message
+   - Minimal code to reproduce
 
 ## Architecture
 
