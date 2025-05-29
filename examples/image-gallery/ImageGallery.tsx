@@ -20,9 +20,8 @@ import Animated, {
   withTiming,
   runOnJS,
   interpolate,
-  Extrapolate,
 } from "react-native-reanimated";
-import { useSwipePredictor } from "react-native-swipe-predictor";
+import { useSwipePredictor } from "../../src"; //This would be replaced with 'react-native-swipe-predictor' in your code
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const THRESHOLD = SCREEN_WIDTH * 0.3;
@@ -118,7 +117,7 @@ const ImageCard: React.FC<ImageCardProps> = ({
         Math.abs(event.translationX),
         [0, SCREEN_WIDTH],
         [1, 0.9],
-        Extrapolate.CLAMP
+        "clamp"
       );
 
       runOnJS(onTouchMove)(event);
@@ -164,7 +163,7 @@ const ImageCard: React.FC<ImageCardProps> = ({
             currentIndex === index - 1 ? translateX.value : 0,
             inputRange,
             [1, 0.7, 1],
-            Extrapolate.CLAMP
+            "clamp"
           )
         : 1,
       transform: [
@@ -174,7 +173,7 @@ const ImageCard: React.FC<ImageCardProps> = ({
                 currentIndex === index - 1 ? translateX.value : 0,
                 inputRange,
                 [1, 0.95, 1],
-                Extrapolate.CLAMP
+                "clamp"
               )
             : 1,
         },

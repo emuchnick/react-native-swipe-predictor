@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { runOnJS, useSharedValue } from 'react-native-reanimated';
-import type { GestureUpdateEvent, GestureStateChangeEvent } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
+import type { 
+  GestureUpdateEvent, 
+  GestureStateChangeEvent,
+  PanGestureHandlerEventPayload 
+} from 'react-native-gesture-handler';
 import { SwipePredictor, SwipePredictorEventEmitter } from '../native/SwipePredictorModule';
 import type { 
   Prediction, 
@@ -14,7 +18,6 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
     confidenceThreshold = 0.7,
     updateInterval = 16, // 60fps default
     onPrediction,
-    physics = 'ios',
     debug = false,
   } = options;
   
@@ -105,7 +108,7 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
     };
   }, [confidenceThreshold, updateInterval, onPrediction, debug]);
   
-  const onTouchStart = useCallback((event?: GestureStateChangeEvent) => {
+  const onTouchStart = useCallback((_event?: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
     'worklet';
     
     if (predictorIdRef.current === null) return;
@@ -123,7 +126,7 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
     })();
   }, []);
   
-  const onTouchMove = useCallback((event: GestureUpdateEvent) => {
+  const onTouchMove = useCallback((event: GestureUpdateEvent<PanGestureHandlerEventPayload>) => {
     'worklet';
     
     if (predictorIdRef.current === null) return;
@@ -175,7 +178,7 @@ export function useSwipePredictor(options: SwipePredictorOptions = {}): SwipePre
     })();
   }, [debug]);
   
-  const onTouchEnd = useCallback((event?: GestureStateChangeEvent) => {
+  const onTouchEnd = useCallback((_event?: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
     'worklet';
     
     runOnJS(() => {

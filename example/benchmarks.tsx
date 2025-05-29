@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { runPerformanceBenchmarks } from '../src/benchmarks/performance';
 
@@ -20,19 +21,19 @@ interface BenchmarkResults {
 
 export default function BenchmarksScreen() {
   const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState<BenchmarkResults | null>(null);
+  const [_results, _setResults] = useState<BenchmarkResults | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
 
   const runBenchmarks = async () => {
     setIsRunning(true);
     setLogs([]);
-    setResults(null);
+    _setResults(null);
 
     // Capture console.log output
     const originalLog = console.log;
     const capturedLogs: string[] = [];
     
-    console.log = (...args) => {
+    console.log = (...args: unknown[]) => {
       const message = args.join(' ');
       capturedLogs.push(message);
       setLogs([...capturedLogs]);

@@ -1,4 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
+import { SwipePredictor } from '../js/native/SwipePredictorModule';
 
 interface BenchmarkResult {
   averageLatency: number;
@@ -21,7 +22,7 @@ class PerformanceBenchmark {
   private predictions: number[] = [];
   private frameTimestamps: number[] = [];
   private startTime: number = 0;
-  private nativeModule: any;
+  private nativeModule: typeof SwipePredictor;
   // private eventEmitter: NativeEventEmitter;
   private droppedFrames: number = 0;
   private lastFrameTime: number = 0;
@@ -55,7 +56,10 @@ class PerformanceBenchmark {
   }
 
   private async benchmarkPattern(touchPoints: TouchPoint[]): Promise<void> {
-    const predictorId = await this.nativeModule.createPredictor();
+    const predictorId = await this.nativeModule.createPredictor({
+      confidenceThreshold: 0.7,
+      updateInterval: 16
+    });
     
     for (const point of touchPoints) {
       const startTime = performance.now();
@@ -76,7 +80,7 @@ class PerformanceBenchmark {
       this.trackFrame(endTime);
     }
     
-    await this.nativeModule.releasePredictor(predictorId);
+    await this.nativeModule.removePredictor(predictorId);
   }
 
   private trackFrame(timestamp: number): void {
