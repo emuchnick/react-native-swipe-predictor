@@ -28,14 +28,6 @@ With predictor: [Touch] → [Move + Animation starts] → [Done] (0ms delay)
 
 _Left: Standard React Native | Right: With Swipe Predictor_
 
-## Live Examples
-
-Try out these interactive examples:
-
-- **[Tinder Cards](usage-examples/tinder-cards)** - Swipeable card stack with predictive animations
-- **[Navigation Drawer](usage-examples/navigation-drawer)** - Smooth drawer with predictive opening/closing
-- **[Image Gallery](usage-examples/image-gallery)** - Gallery with buttery smooth image transitions
-
 ## Who Needs This Library?
 
 ### ✅ You NEED this if you're building:
@@ -68,7 +60,7 @@ This library uses **Rust** for high-performance calculations, but don't worry! E
 ### Prerequisites
 
 - React Native 0.70 or higher
-- iOS 13.0+ / Android 6.0+ (API 23+)
+- iOS 15.1+ / Android 6.0+ (API 23+)
 - [react-native-gesture-handler](https://docs.swmansion.com/react-native-gesture-handler/) (required for gesture handling)
 - [react-native-reanimated](https://docs.swmansion.com/react-native-reanimated/) (required for animations)
 
@@ -92,14 +84,14 @@ yarn add react-native-swipe-predictor react-native-gesture-handler react-native-
 cd ios && pod install
 ```
 
-2. **Important for M1/M2 Macs**: If you encounter architecture issues:
+2. **Important for M1/M2 Macs**: If you encounter architecture issues, try:
 
 ```bash
 cd ios && arch -x86_64 pod install
 ```
 
 3. Open your project in Xcode and ensure:
-   - Minimum iOS Deployment Target is 13.0 or higher
+   - Minimum iOS Deployment Target is 15.1 or higher
    - Build Settings → Enable Bitcode is set to "No"
 
 #### Android Setup
@@ -130,7 +122,7 @@ android {
 }
 ```
 
-### Step 3: Verify Installation
+### Step 3: Verify Installation (optional)
 
 Create a test component to verify everything is working:
 
@@ -221,49 +213,7 @@ npx react-native run-android
 
 If everything is set up correctly, you should be able to swipe the blue box and see it animate smoothly!
 
-## Quick Start
-
-Once installed, here's a minimal example:
-
-```tsx
-import { useSwipePredictor } from "react-native-swipe-predictor";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, {
-  useSharedValue,
-  withSpring,
-  runOnJS,
-} from "react-native-reanimated";
-
-function SwipeableCard() {
-  const translateX = useSharedValue(0);
-
-  const { onTouchStart, onTouchMove, onTouchEnd } = useSwipePredictor({
-    onPrediction: ({ x, confidence }) => {
-      "worklet";
-      // Start animating toward predicted position immediately
-      if (confidence > 0.7) {
-        translateX.value = withSpring(x);
-      }
-    },
-  });
-
-  const gesture = Gesture.Pan()
-    .onBegin(() => runOnJS(onTouchStart)())
-    .onUpdate((e) => {
-      translateX.value = e.translationX;
-      runOnJS(onTouchMove)(e);
-    })
-    .onEnd(() => runOnJS(onTouchEnd)());
-
-  return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View style={{ transform: [{ translateX }] }}>
-        {/* Your content */}
-      </Animated.View>
-    </GestureDetector>
-  );
-}
-```
+Alternatively, try our [Example App](/example/README.md).
 
 ## API Reference
 
@@ -349,14 +299,14 @@ We provide pre-built hooks for common use cases:
 Optimized for image galleries with smart preloading:
 
 ```tsx
-import { usePredictiveImageGallery } from 'react-native-swipe-predictor';
+import { usePredictiveImageGallery } from "react-native-swipe-predictor";
 
 const { onTouchMove, onTouchStart, onTouchEnd } = usePredictiveImageGallery({
   images: imageUrls,
   currentIndex,
   imageWidth: SCREEN_WIDTH,
   onPreload: (indices, priority) => {
-    indices.forEach(index => {
+    indices.forEach((index) => {
       Image.prefetch(imageUrls[index]);
     });
   },
@@ -369,26 +319,27 @@ const { onTouchMove, onTouchStart, onTouchEnd } = usePredictiveImageGallery({
 Perfect for Tinder-style card interactions:
 
 ```tsx
-import { usePredictiveCards } from 'react-native-swipe-predictor';
+import { usePredictiveCards } from "react-native-swipe-predictor";
 
-const { onTouchMove, onTouchStart, onTouchEnd, predictedAction } = usePredictiveCards({
-  onActionPredicted: (action, confidence) => {
-    'worklet';
-    switch (action) {
-      case 'like':
-        cardRotation.value = withSpring(15);
-        break;
-      case 'dislike':
-        cardRotation.value = withSpring(-15);
-        break;
-      case 'superlike':
-        cardScale.value = withSpring(1.2);
-        break;
-    }
-  },
-  horizontalThreshold: 120,
-  verticalThreshold: -100,
-});
+const { onTouchMove, onTouchStart, onTouchEnd, predictedAction } =
+  usePredictiveCards({
+    onActionPredicted: (action, confidence) => {
+      "worklet";
+      switch (action) {
+        case "like":
+          cardRotation.value = withSpring(15);
+          break;
+        case "dislike":
+          cardRotation.value = withSpring(-15);
+          break;
+        case "superlike":
+          cardScale.value = withSpring(1.2);
+          break;
+      }
+    },
+    horizontalThreshold: 120,
+    verticalThreshold: -100,
+  });
 ```
 
 #### `usePredictiveNavigation`
@@ -396,16 +347,16 @@ const { onTouchMove, onTouchStart, onTouchEnd, predictedAction } = usePredictive
 For navigation gestures with directional prediction:
 
 ```tsx
-import { usePredictiveNavigation } from 'react-native-swipe-predictor';
+import { usePredictiveNavigation } from "react-native-swipe-predictor";
 
 const { onTouchMove, onTouchStart, onTouchEnd } = usePredictiveNavigation({
   onNavigationPredicted: (direction, confidence) => {
     if (confidence > 0.8) {
       switch (direction) {
-        case 'left':
-          prefetchScreen('NextScreen');
+        case "left":
+          prefetchScreen("NextScreen");
           break;
-        case 'right':
+        case "right":
           prepareGoBack();
           break;
       }
@@ -420,29 +371,25 @@ const { onTouchMove, onTouchStart, onTouchEnd } = usePredictiveNavigation({
 Monitor performance and accuracy:
 
 ```tsx
-import { useSwipePredictorWithMetrics } from 'react-native-swipe-predictor';
+import { useSwipePredictorWithMetrics } from "react-native-swipe-predictor";
 
-const { 
-  onTouchMove, 
-  onTouchStart, 
-  onTouchEnd, 
-  metrics 
-} = useSwipePredictorWithMetrics({
-  onPrediction: ({ x, y }) => {
-    // Your prediction handler
-  },
-  onValidatePrediction: (prediction, actual) => {
-    const distance = Math.sqrt(
-      Math.pow(prediction.x - actual.x, 2) + 
-      Math.pow(prediction.y - actual.y, 2)
-    );
-    return distance < 50; // Within 50 pixels
-  }
-});
+const { onTouchMove, onTouchStart, onTouchEnd, metrics } =
+  useSwipePredictorWithMetrics({
+    onPrediction: ({ x, y }) => {
+      // Your prediction handler
+    },
+    onValidatePrediction: (prediction, actual) => {
+      const distance = Math.sqrt(
+        Math.pow(prediction.x - actual.x, 2) +
+          Math.pow(prediction.y - actual.y, 2)
+      );
+      return distance < 50; // Within 50 pixels
+    },
+  });
 
-console.log('Average confidence:', metrics.averageConfidence);
-console.log('Predictions/sec:', metrics.predictionsPerSecond);
-console.log('Accuracy:', metrics.accuracy);
+console.log("Average confidence:", metrics.averageConfidence);
+console.log("Predictions/sec:", metrics.predictionsPerSecond);
+console.log("Accuracy:", metrics.accuracy);
 ```
 
 ### Custom Physics
@@ -624,13 +571,14 @@ The Rust core maintains a rolling buffer of touch points and uses physics equati
 | Setup complexity   | Low         | Low                  |
 | Bundle size impact | 0KB         | ~200KB               |
 
-## > Contributing
+## Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ### Development Setup
 
 ```bash
+# Remember, this library is made mostly in rust. This setup assumes you already have rust installed
 # Clone the repo
 git clone https://github.com/emuchnick/react-native-swipe-predictor
 
@@ -644,12 +592,8 @@ yarn build:rust
 cd example && yarn ios
 ```
 
+---
+
 ## License
 
 MIT © Ethan Muchnick
-
----
-
-<p align="center">
-  Made with love by developers who care about 60fps
-</p>
