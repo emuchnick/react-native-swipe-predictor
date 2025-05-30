@@ -20,6 +20,7 @@ ios/build/
 *.xcworkspace
 *.xcuserdata
 DerivedData/
+!/ios/libswipe_predictor.a
 
 # Android
 android/build/
