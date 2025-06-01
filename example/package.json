@@ -12,7 +12,15 @@
     "expo": "~53.0.9",
     "expo-status-bar": "~2.2.3",
     "react": "19.0.0",
-    "react-native": "0.79.2"
+    "react-native": "0.79.2",
+    "react-native-swipe-predictor": "file:../",
+    "react-native-gesture-handler": "~2.20.2",
+    "react-native-reanimated": "~3.16.5",
+    "@react-navigation/bottom-tabs": "^6.6.1",
+    "@react-navigation/native": "^6.1.18",
+    "react-native-screens": "~3.37.0",
+    "react-native-safe-area-context": "~4.14.0",
+    "@react-native-community/slider": "~4.5.5"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

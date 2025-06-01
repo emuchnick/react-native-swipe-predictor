@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSwipePredictor } from './useSwipePredictor';
 import type { SwipePredictorOptions, SwipePredictorHookResult, Prediction } from '../types';
+import type { GestureStateChangeEvent, PanGestureHandlerEventPayload } from 'react-native-gesture-handler';
 
 /**
  * Performance metrics for swipe prediction
@@ -184,14 +185,14 @@ export function useSwipePredictorWithMetrics({
   });
 
   // Enhanced touch start handler
-  const onTouchStart = useCallback((event?: any) => {
+  const onTouchStart = useCallback((event?: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
     metricsRef.current.gestureStartTime = Date.now();
     metricsRef.current.lastPredictionTime = Date.now();
     basePredictorResult.onTouchStart(event);
   }, [basePredictorResult.onTouchStart]);
 
   // Enhanced touch end handler
-  const onTouchEnd = useCallback((event?: any) => {
+  const onTouchEnd = useCallback((event?: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
     const gestureDuration = Date.now() - metricsRef.current.gestureStartTime;
     metricsRef.current.gestureDurations.push(gestureDuration);
 
@@ -211,7 +212,7 @@ export function useSwipePredictorWithMetrics({
     }));
 
     // Validate prediction if handler provided and we have a prediction
-    if (onValidatePrediction && basePredictorResult.prediction && event) {
+    if (onValidatePrediction && basePredictorResult.prediction && event && 'translationX' in event && 'translationY' in event) {
       const actual = {
         x: event.translationX || 0,
         y: event.translationY || 0,
