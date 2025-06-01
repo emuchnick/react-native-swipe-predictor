@@ -1,6 +1,6 @@
 use jni::JNIEnv;
 use jni::objects::{JClass, JObject};
-use jni::sys::{jdouble, jint, jlong, JavaVM, JNI_VERSION_1_6};
+use jni::sys::{jdouble, jint, JavaVM, JNI_VERSION_1_6};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -11,9 +11,14 @@ struct HandlePtr(*mut SwipePredictorHandle);
 unsafe impl Send for HandlePtr {}
 unsafe impl Sync for HandlePtr {}
 
+// Wrapper for context pointers to make them Send + Sync
+struct ContextPtr(*mut SwipePredictorContext);
+unsafe impl Send for ContextPtr {}
+unsafe impl Sync for ContextPtr {}
+
 // Global state for Android including handle mapping
 struct AndroidState {
-    context: Option<*mut SwipePredictorContext>,
+    context: Option<ContextPtr>,
     handles: HashMap<i32, HandlePtr>,
     next_id: i32,
 }
@@ -29,10 +34,13 @@ impl AndroidState {
 }
 
 // Global state with handle mapping to avoid pointer truncation
-static GLOBAL_STATE: Mutex<AndroidState> = Mutex::new(AndroidState {
-    context: None,
-    handles: HashMap::new(),
-    next_id: 1,
+use std::sync::LazyLock;
+static GLOBAL_STATE: LazyLock<Mutex<AndroidState>> = LazyLock::new(|| {
+    Mutex::new(AndroidState {
+        context: None,
+        handles: HashMap::new(),
+        next_id: 1,
+    })
 });
 
 /// Called when the native library is loaded by the JVM
@@ -47,12 +55,12 @@ pub extern "system" fn JNI_OnLoad(_vm: JavaVM, _: *mut std::os::raw::c_void) -> 
 
 #[no_mangle]
 pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeInitManager(
-    env: JNIEnv,
+    mut env: JNIEnv,
     _class: JClass,
     deceleration_rate: jdouble,
     min_velocity_threshold: jdouble,
     min_gesture_time_ms: jdouble,
-    velocity_smoothing_factor: jdouble,
+    _velocity_smoothing_factor: jdouble,
 ) {
     // Validate parameters
     if deceleration_rate <= 0.0 {
@@ -106,23 +114,23 @@ pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeInitMa
     };
     
     // Clean up existing handles and context
-    if let Some(old_ctx) = state.context {
+    if let Some(old_ctx) = state.context.take() {
         // Destroy all existing handles first
         for (_, handle_ptr) in state.handles.drain() {
             crate::ffi::swipe_predictor_destroy(handle_ptr.0);
         }
         // Destroy old context
-        crate::ffi::swipe_predictor_context_destroy(old_ctx);
+        crate::ffi::swipe_predictor_context_destroy(old_ctx.0);
     }
     
     // Set new context and reset state
-    state.context = Some(ctx);
+    state.context = Some(ContextPtr(ctx));
     state.next_id = 1;
 }
 
 #[no_mangle]
 pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeInitPredictor(
-    env: JNIEnv,
+    mut env: JNIEnv,
     _class: JClass,
 ) -> jint {
     let mut state = match GLOBAL_STATE.lock() {
@@ -136,8 +144,8 @@ pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeInitPr
         }
     };
     
-    let ctx = match state.context {
-        Some(ctx) => ctx,
+    let ctx = match &state.context {
+        Some(ctx) => ctx.0,
         None => {
             let _ = env.throw_new(
                 "java/lang/IllegalStateException",
@@ -161,7 +169,7 @@ pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeInitPr
 
 #[no_mangle]
 pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeAddTouchPoint(
-    env: JNIEnv,
+    mut env: JNIEnv,
     _class: JClass,
     predictor_id: jint,
     x: jdouble,
@@ -196,11 +204,11 @@ pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeAddTou
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeGetPrediction(
-    env: JNIEnv,
-    _class: JClass,
+pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeGetPrediction<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
     predictor_id: jint,
-) -> JObject {
+) -> JObject<'local> {
     if predictor_id < 0 {
         return JObject::null();
     }
@@ -327,9 +335,8 @@ pub extern "system" fn Java_com_swipepredictor_SwipePredictorModule_nativeShutdo
     }
     
     // Destroy context
-    if let Some(ctx) = state.context {
-        crate::ffi::swipe_predictor_context_destroy(ctx);
-        state.context = None;
+    if let Some(ctx) = state.context.take() {
+        crate::ffi::swipe_predictor_context_destroy(ctx.0);
     }
     
     // Reset next_id
