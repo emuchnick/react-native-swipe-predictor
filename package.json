@@ -1,6 +1,6 @@
 {
   "name": "react-native-swipe-predictor",
-  "version": "0.20.0",
+  "version": "0.20.1",
   "description": "Create impossibly responsive swipe interactions by predicting where gestures will end",
   "type": "module",
   "main": "lib/commonjs/index",

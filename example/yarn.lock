@@ -3856,10 +3856,10 @@ react-native-svg@15.11.2:
     css-tree "^1.1.3"
     warn-once "0.1.1"
 
-react-native-swipe-predictor@~0.20.0:
-  version "0.20.0"
-  resolved "https://registry.yarnpkg.com/react-native-swipe-predictor/-/react-native-swipe-predictor-0.20.0.tgz#8ff8235a9689f2ad37d49f021ef1202f3753ccae"
-  integrity sha512-rEYZ8MzErt0NhbVBn4N+ZPeITV5+Ohu2EC7DodMZ6aLXWiopK8/y9c9iIcjRtT64fGFLqC24PpJVUjT0ajcUIA==
+react-native-swipe-predictor@~0.20.1:
+  version "0.20.1"
+  resolved "https://registry.yarnpkg.com/react-native-swipe-predictor/-/react-native-swipe-predictor-0.20.1.tgz#dd0a2398e4ade51ebf68f1c31bd5a82974b171e7"
+  integrity sha512-z59D7pVHlN5jkOte4+tv2tPh93hrVE7JhUispu0L0eAy1mTiq5A/tP4Zb1XqRDw1FUqr1x+imvfRu3KHwJ3Dyg==
 
 react-native@0.79.2:
   version "0.79.2"

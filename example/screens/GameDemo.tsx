@@ -11,6 +11,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  runOnJS,
 } from 'react-native-reanimated';
 import { useSwipePredictor } from 'react-native-swipe-predictor';
 import Slider from '@react-native-community/slider';

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import Animated, {
   interpolate,
   Extrapolate,
   useSharedValue,
+  runOnJS,
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
@@ -35,7 +36,7 @@ const SAMPLE_PROFILES = [
 
 /**
  * CardsDemo - Tinder-style card swiping with predictive feedback
- * 
+ *
  * @description
  * This screen demonstrates how SwipePredictor enhances card-based interfaces.
  * Features include:
@@ -43,15 +44,15 @@ const SAMPLE_PROFILES = [
  * - Smooth animations driven by prediction confidence
  * - Card rotation and opacity changes based on swipe direction
  * - Stack visualization with background cards
- * 
+ *
  * The demo uses the specialized `usePredictiveCards` hook which provides:
  * - Pre-configured swipe thresholds
  * - Action prediction (like/dislike/superlike)
  * - Gesture state management
- * 
+ *
  * @component
  * @returns {JSX.Element} Interactive card stack with swipe gestures
- * 
+ *
  * @example
  * // The component manages its own state for the card stack
  * // and resets when all cards have been swiped
@@ -62,6 +63,13 @@ export default function CardsDemo() {
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
 
+  const handleActionPredicted = useCallback(
+    (action: any, confidence: number) => {
+      console.log("Predicted action:", action, "with confidence:", confidence);
+    },
+    []
+  );
+
   const {
     onTouchStart,
     onTouchMove,
@@ -70,33 +78,45 @@ export default function CardsDemo() {
     isActive,
     predictedAction,
   } = usePredictiveCards({
-    onActionPredicted: (action, confidence) => {
-      console.log("Predicted action:", action, "with confidence:", confidence);
-    },
+    onActionPredicted: handleActionPredicted,
     horizontalThreshold: width * 0.4,
     enableSuperlike: false,
   });
 
+  const handleSwipeComplete = useCallback(() => {
+    setTimeout(() => {
+      setCurrentIndex((prev) => prev + 1);
+      translateX.value = 0;
+      translateY.value = 0;
+    }, 300);
+  }, [translateX, translateY]);
+
   const gesture = Gesture.Pan()
     .onBegin(() => {
-      onTouchStart();
+      "worklet";
+      runOnJS(onTouchStart)();
     })
     .onUpdate((event) => {
+      "worklet";
       translateX.value = event.translationX;
       translateY.value = event.translationY;
-      onTouchMove(event);
+      // Extract only the data we need to pass to JS
+      const eventData = {
+        translationX: event.translationX,
+        translationY: event.translationY,
+      };
+      runOnJS((data) => {
+        onTouchMove(data as any);
+      })(eventData);
     })
-    .onEnd((_event) => {
-      onTouchEnd(undefined);
+    .onEnd(() => {
+      "worklet";
+      runOnJS(onTouchEnd)();
       const shouldSwipe = Math.abs(translateX.value) > width * 0.4;
       if (shouldSwipe) {
         translateX.value = withSpring(translateX.value > 0 ? width : -width);
         translateY.value = withSpring(0);
-        setTimeout(() => {
-          setCurrentIndex((prev) => prev + 1);
-          translateX.value = 0;
-          translateY.value = 0;
-        }, 300);
+        runOnJS(handleSwipeComplete)();
       } else {
         translateX.value = withSpring(0);
         translateY.value = withSpring(0);

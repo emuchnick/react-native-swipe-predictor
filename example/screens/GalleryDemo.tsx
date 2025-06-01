@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { usePredictiveImageGallery } from 'react-native-swipe-predictor';
 import { createGestureEvent, getTouchCoordinates } from '../utils/gestureHelpers';
+import { runOnJS } from 'react-native-reanimated';
 
 /**
  * Device width for responsive sizing
