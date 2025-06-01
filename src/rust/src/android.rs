@@ -36,11 +36,7 @@ impl AndroidState {
 // Global state with handle mapping to avoid pointer truncation
 use std::sync::LazyLock;
 static GLOBAL_STATE: LazyLock<Mutex<AndroidState>> = LazyLock::new(|| {
-    Mutex::new(AndroidState {
-        context: None,
-        handles: HashMap::new(),
-        next_id: 1,
-    })
+    Mutex::new(AndroidState::new())
 });
 
 /// Called when the native library is loaded by the JVM

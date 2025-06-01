@@ -163,7 +163,7 @@ impl GesturePredictor {
 
         let n = self.touch_buffer.len();
         let mut prev_point: Option<&TouchPoint> = None;
-        
+
         for (i, curr) in self.touch_buffer.iter().enumerate() {
             if let Some(prev) = prev_point {
                 if let Some(dt) = curr.timestamp.duration_since(&prev.timestamp) {
@@ -244,7 +244,7 @@ impl GesturePredictor {
 
         let mut path_distance = 0.0;
         let mut prev_pos: Option<&Point2D> = None;
-        
+
         for point in &self.touch_buffer {
             if let Some(prev) = prev_pos {
                 path_distance += prev.distance_to(&point.position);
@@ -265,7 +265,7 @@ impl GesturePredictor {
 
         let mut recent_speeds = Vec::with_capacity(3);
         let mut prev_point: Option<&TouchPoint> = None;
-        
+
         for point in self.touch_buffer.iter().skip(start_idx) {
             if let Some(prev) = prev_point {
                 if let Some(dt) = point.timestamp.duration_since(&prev.timestamp) {

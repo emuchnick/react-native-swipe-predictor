@@ -30,7 +30,7 @@ impl HandleStorage {
     }
 }
 
-// Use once_cell for lazy initialization
+// Use OnceLock for lazy initialization
 use std::sync::OnceLock;
 
 static IOS_STORAGE: OnceLock<Mutex<HandleStorage>> = OnceLock::new();
