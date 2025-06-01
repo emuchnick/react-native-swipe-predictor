@@ -10,10 +10,12 @@ target/
 *.dylib
 *.framework
 
+
 # Rust
 src/rust/target/
 src/rust/target-check/
 src/rust/Cargo.lock
+src/rust/.cargo/
 
 # iOS
 ios/build/
