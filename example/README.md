@@ -10,7 +10,6 @@ This example app demonstrates the capabilities of the `react-native-swipe-predic
 - Yarn or npm
 - Expo CLI (`npm install -g expo-cli`)
 - iOS Simulator (Mac only) or Android Emulator
-- Expo Go app on your physical device (optional)
 
 ### Installation
 
@@ -43,11 +42,7 @@ yarn android
 
 #### Expo Go (Physical Device)
 
-```bash
-yarn start
-```
-
-Then scan the QR code with Expo Go (Android) or Camera app (iOS)
+Unfortunately this module cannot be run on Expo Go because Expo Go does not support native modules.
 
 ## 📱 Demo Screens
 
