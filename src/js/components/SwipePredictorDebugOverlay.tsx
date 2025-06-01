@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Svg, { Path, Circle, Line, G } from 'react-native-svg';
+import Svg, { Path, Circle, Line, G, Defs, Marker } from 'react-native-svg';
 import type { DebugInfo, Prediction } from '../types';
 
 interface SwipePredictorDebugOverlayProps {
@@ -72,8 +72,8 @@ export function SwipePredictorDebugOverlay({
             strokeWidth={3}
             markerEnd="url(#arrowhead)"
           />
-          <defs>
-            <marker
+          <Defs>
+            <Marker
               id="arrowhead"
               markerWidth="10"
               markerHeight="10"
@@ -82,9 +82,9 @@ export function SwipePredictorDebugOverlay({
               orient="auto"
               markerUnits="strokeWidth"
             >
-              <path d="M0,0 L0,6 L9,3 z" fill="#FF3B30" />
-            </marker>
-          </defs>
+              <Path d="M0,0 L0,6 L9,3 z" fill="#FF3B30" />
+            </Marker>
+          </Defs>
         </G>
         
         {/* Predicted position */}
