@@ -1,6 +1,5 @@
 # Example app and demos
 example/
-usage-examples/
 
 # Rust source (only built artifacts are needed)
 src/rust/src/

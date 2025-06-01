@@ -10,7 +10,8 @@
   "source": "src/index",
   "private": true,
   "files": [
-    "src",
+    "src/index.ts",
+    "src/js/**/*",
     "lib",
     "android",
     "ios",
@@ -18,7 +19,9 @@
     "!**/__tests__",
     "!**/__fixtures__",
     "!**/__mocks__",
-    "!**/.*"
+    "!**/.*",
+    "!src/rust/**",
+    "!src/benchmarks/**"
   ],
   "scripts": {
     "typescript": "tsc --noEmit",

@@ -24,10 +24,12 @@ libc = "0.2"
 jni = "0.21"
 
 [profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
+opt-level = "z"     # Optimize for size rather than speed
+lto = true          # Link-time optimization
+codegen-units = 1   # Single codegen unit for better optimization
+strip = true        # Strip debug symbols
+panic = "abort"     # Smaller panic handler
+overflow-checks = false  # Disable overflow checks in release
 
 [profile.dev]
 opt-level = 1
